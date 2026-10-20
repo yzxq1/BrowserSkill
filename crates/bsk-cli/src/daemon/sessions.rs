@@ -47,6 +47,8 @@ impl std::fmt::Display for SessionId {
 
 #[derive(Debug, Clone)]
 pub struct Session {
+    pub default_tab_id: Option<i64>,
+    pub window_mode: Option<String>,
     pub interaction: Option<bsk_protocol::tools::InteractionPolicy>,
     pub id: SessionId,
     pub browser_id: BrowserId,
@@ -57,6 +59,9 @@ pub struct Session {
 impl Session {
     pub fn status_entry(&self) -> SessionStatusEntry {
         SessionStatusEntry {
+            paused: None,
+            default_tab_id: self.default_tab_id,
+            window_mode: self.window_mode.clone(),
             interaction: self.interaction,
             session_id: self.id.0.clone(),
             browser_instance_id: self.browser_id.0.clone(),
@@ -153,6 +158,8 @@ impl SessionRegistry {
             guard.insert(
                 candidate.clone(),
                 Session {
+    default_tab_id: None,
+    window_mode: None,
                     interaction: None,
                     id: candidate.clone(),
                     browser_id: browser_id.clone(),
@@ -466,6 +473,7 @@ const SESSION_ID_MAX_RESERVE_ATTEMPTS: u32 = 64;
 /// (background window, browser-chosen size).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AgentWindowOptions {
+    pub window_id: Option<i64>,
     /// Opt in to Chrome's shared incognito browsing session.
     pub incognito: bool,
     /// Optional outer size as `(width, height)` CSS pixels.
@@ -554,6 +562,16 @@ pub(crate) async fn start_session_recoverable(
     if client.is_unresponsive() {
         return Err(StartSessionError::ExtensionUnresponsive);
     }
+    if window.window_id.is_some_and(|id| id != -1 && id <= 0) || (window.window_id.is_some() &&
+        (window.incognito || window.size.is_some() || window.focused == Some(true))) {
+        return Err(StartSessionError::ExtensionError(RpcError { code: ErrorCode::InvalidParams,
+            message: "window_id conflicts with incognito, size or focus, or is not positive".into(), data: None }));
+    }
+    if window.window_id.is_some() && !bsk_protocol::tools::supports_session_control(&client.extension_protocol_version) {
+        return Err(StartSessionError::ExtensionError(RpcError { code: ErrorCode::Unsupported,
+            message: "Existing windows require extension protocol 1.5; update the extension".into(),
+            data: Some(serde_json::json!({"reason":"unsupported_feature","component":"extension","required_protocol":"1.5","actual_protocol":client.extension_protocol_version})) }));
+    }
     if window.incognito
         && !bsk_protocol::tools::supports_incognito_sessions(&client.extension_protocol_version)
     {
@@ -579,6 +597,7 @@ pub(crate) async fn start_session_recoverable(
         sessions.starting.lock().unwrap().insert(session_id.clone());
     }
     let params = SessionStartParams {
+        window_id: window.window_id,
         incognito: window.incognito,
         session_id: session_id.0.clone(),
         browser_instance_id: Some(client.id.0.clone()),
@@ -735,6 +754,8 @@ pub(crate) async fn start_session_recoverable(
         let mut guard = sessions.inner.lock().expect("session registry poisoned");
         if let Some(session) = guard.get_mut(&session_id) {
             session.interaction = session.interaction.or(start_result.interaction);
+            session.default_tab_id = start_result.default_tab_id;
+            session.window_mode = start_result.window_mode.clone();
         }
     }
     let session = sessions
@@ -1125,6 +1146,7 @@ mod link_tests {
                     &queues,
                     None,
                     AgentWindowOptions {
+    window_id: None,
                         size: None,
                         focused: Some(false),
                         ..Default::default()
@@ -1285,6 +1307,8 @@ mod link_tests {
             &request,
             ResponseBody::Ok(
                 serde_json::to_value(SessionStartResult {
+    default_tab_id: None,
+    window_mode: None,
                     interaction: None,
                     agent_window_id: Some(9),
                 })

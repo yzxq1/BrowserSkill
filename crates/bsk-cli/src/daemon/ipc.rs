@@ -135,7 +135,7 @@ impl DaemonStatus {
             .sessions
             .snapshot()
             .into_iter()
-            .map(|s| s.status_entry())
+            .map(|s| { let mut entry = s.status_entry(); entry.paused = Some(state.session_interrupts.is_pending(&s.id)); entry })
             .collect();
         StatusResult {
             daemon_version: self.daemon_version.to_string(),
@@ -249,6 +249,7 @@ pub fn full_handler(status: DaemonStatus, state: Arc<DaemonState>) -> RpcHandler
                         Err(e) => ResponseBody::Err(e),
                     }
                 }
+                Method::SessionResume | Method::ToolSessionResume => handle_session_resume(&state, params).await,
                 Method::SessionStop => match handle_session_stop(&state, rpc_id, params).await {
                     Ok(v) => ResponseBody::Ok(v),
                     Err(e) => ResponseBody::Err(e),
@@ -395,6 +396,54 @@ async fn handle_video(state: &Arc<DaemonState>, rpc_id: RpcId, params: Value) ->
     result
 }
 
+fn paused_error() -> RpcError {
+    RpcError { code: ErrorCode::UserAborted,
+        message: "Session paused by user interrupt. Ask the user to explicitly continue, then run bsk session resume SID.".into(),
+        data: Some(serde_json::json!({"reason":"session_paused"})) }
+}
+
+async fn handle_session_resume(state: &Arc<DaemonState>, params: Value) -> ResponseBody {
+    let params: bsk_protocol::tools::SessionResumeParams = match serde_json::from_value(params) {
+        Ok(params) => params,
+        Err(error) => return ResponseBody::Err(invalid_params(error.to_string())),
+    };
+    if params.session_id.is_empty() { return ResponseBody::Err(invalid_params("session_id is required")); }
+    let sid = SessionId(params.session_id.clone());
+    // Capture before any await. Only this generation can be cleared.
+    let generation = state.session_interrupts.generation(&sid);
+    let Some(session) = state.sessions.get(&sid) else {
+        return ResponseBody::Err(RpcError { code: ErrorCode::NotFound, message: "session not found".into(), data: None });
+    };
+    let Some(browser) = state.browsers.get(&session.browser_id) else {
+        return ResponseBody::Err(RpcError { code: ErrorCode::NotFound, message: "owning browser disconnected".into(), data: None });
+    };
+    if !bsk_protocol::tools::supports_session_control(&browser.extension_protocol_version) {
+        return ResponseBody::Err(RpcError { code: ErrorCode::Unsupported,
+            message: "Session resume requires extension protocol 1.5; update the extension".into(),
+            data: Some(serde_json::json!({"reason":"unsupported_feature","component":"extension","required_protocol":"1.5","actual_protocol":browser.extension_protocol_version})) });
+    }
+    // Do not queue behind, replay, or revive any old cancelled operation.
+    // Queue dispatch also atomically reserves its busy slot, covering races.
+    if state.tool_inflight.has_session(&sid) {
+        return ResponseBody::Err(DispatchError::SessionBusy.into_rpc());
+    }
+    let result = state.tool_queues.dispatch(&sid, Method::ToolSessionResume,
+        serde_json::to_value(params).unwrap(), DEFAULT_RPC_TIMEOUT, None).await;
+    match result {
+        Ok(value) => {
+            match serde_json::from_value::<bsk_protocol::tools::SessionResumeResult>(value.clone()) {
+                Ok(result) if result.resumed => {},
+                _ => return ResponseBody::Err(RpcError { code: ErrorCode::ProtocolError,
+                    message: "Extension did not confirm session resume".into(), data: None }),
+            }
+            if state.session_interrupts.clear_if_generation(&sid, generation) {
+                ResponseBody::Ok(value)
+            } else { ResponseBody::Err(paused_error()) }
+        }
+        Err(error) => ResponseBody::Err(error.into_rpc()),
+    }
+}
+
 /// IPC entry point for `tool.*` RPCs (M6+). Looks up the per-session
 /// dispatch queue and forwards the call; never touches the
 /// BrowserSink directly. `tool.session_start` / `tool.session_stop`
@@ -434,24 +483,6 @@ async fn handle_tool_dispatch(
             data: None,
         });
     }
-    // Pre-flight: if the user has clicked the agent-window mask's
-    // stop button, every session carries a one-shot "pending
-    // interrupt" marker. The marker is consumed by the next method
-    // that dispatches browser/page input (which is rejected with
-    // `UserAborted`). Passive reads and control-plane RPCs pass through
-    // transparently — gating them would prevent the agent from observing
-    // page state before asking the user, or from cleanly tearing down the
-    // session. Classification lives on `Method::effect()` so adding a new
-    // tool variant requires an explicit classification call.
-    if method.requires_interrupt_gate_with_params(&params)
-        && state.session_interrupts.try_consume(&session_id)
-    {
-        return ResponseBody::Err(RpcError {
-            code: ErrorCode::UserAborted,
-            message: "tool dispatch rejected: pending user interrupt. The user explicitly requested to stop. Ask the user how to proceed before issuing further actions.".into(),
-            data: None,
-        });
-    }
     let timeout = match tool_dispatch_transport_timeout(&method, &params) {
         Ok(timeout) => timeout,
         Err(err) => return ResponseBody::Err(err),
@@ -466,6 +497,13 @@ async fn handle_tool_dispatch(
             });
         }
     };
+    // Register before checking pause: a concurrent interrupt either cancels
+    // this entry or is seen here. No action can consume the pause.
+    if method.requires_interrupt_gate_with_params(&params)
+        && state.session_interrupts.is_pending(&session_id)
+    {
+        return ResponseBody::Err(paused_error());
+    }
     if method == Method::ToolDebug
         && matches!(
             params.get("action").and_then(Value::as_str),
@@ -948,6 +986,8 @@ fn tool_dispatch_transport_timeout(method: &Method, params: &Value) -> Result<Du
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CliSessionStartParams {
     #[serde(default)]
+    pub window_id: Option<i64>,
+    #[serde(default)]
     pub incognito: bool,
     #[serde(default)]
     pub browser_instance_id: Option<String>,
@@ -961,6 +1001,10 @@ struct CliSessionStartParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CliSessionStartResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_tab_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interaction: Option<bsk_protocol::tools::InteractionPolicy>,
     pub session_id: String,
@@ -1067,6 +1111,7 @@ pub(super) async fn handle_session_start(
     let cancel = abort_guard.token().clone();
     let params: CliSessionStartParams = if params.is_null() {
         CliSessionStartParams {
+            window_id: None,
             incognito: false,
             browser_instance_id: None,
             width: None,
@@ -1080,6 +1125,10 @@ pub(super) async fn handle_session_start(
             data: None,
         })?
     };
+    if params.window_id.is_some_and(|id| id != -1 && id <= 0) || (params.window_id.is_some() &&
+        (params.incognito || params.width.is_some() || params.height.is_some() || params.focused == Some(true))) {
+        return Err(invalid_params("window_id requires a positive ID and conflicts with incognito, size and focus"));
+    }
     // `--width` without `--height` (or vice versa) is rejected: the
     // extension only accepts a complete size pair.
     let window_size = match (params.width, params.height) {
@@ -1099,6 +1148,7 @@ pub(super) async fn handle_session_start(
         &state.tool_queues,
         params.browser_instance_id.as_deref(),
         AgentWindowOptions {
+            window_id: params.window_id,
             incognito: params.incognito,
             size: window_size,
             focused: params.focused,
@@ -1115,6 +1165,8 @@ pub(super) async fn handle_session_start(
                 state.audit.set_name(&session.id.0, &name);
             }
             let result = CliSessionStartResult {
+                default_tab_id: session.default_tab_id,
+                window_mode: session.window_mode.clone(),
                 interaction: session.interaction,
                 session_id: session.id.0.clone(),
                 browser_instance_id: session.browser_id.0.clone(),
@@ -1397,7 +1449,7 @@ fn handle_session_list(state: &Arc<DaemonState>) -> ResponseBody {
         .sessions
         .snapshot()
         .into_iter()
-        .map(|s| s.status_entry())
+        .map(|s| { let mut entry = s.status_entry(); entry.paused = Some(state.session_interrupts.is_pending(&s.id)); entry })
         .collect();
     ResponseBody::Ok(serde_json::to_value(SessionListResult { sessions }).unwrap_or(Value::Null))
 }

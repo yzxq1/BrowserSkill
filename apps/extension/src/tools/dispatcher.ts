@@ -209,6 +209,48 @@ export class ToolDispatcher {
    * controllers. Made public for tests.
    */
   readonly inflightAbortControllers = new Map<string, AbortController>();
+  private readonly inflightSessions = new Map<string, string>();
+  // Key by context identity: a stopped/recreated session must not inherit a pause.
+  private readonly pausedSessions = new WeakMap<object, number>();
+
+  /** Stop locally first, even if notification to the daemon fails. */
+  interruptSession(sessionId: string): boolean {
+    const ctx = this.sessions.get(sessionId);
+    if (!ctx) return false;
+    this.pausedSessions.set(ctx, (this.pausedSessions.get(ctx) ?? 0) + 1);
+    for (const [rpcId, owner] of this.inflightSessions) {
+      if (owner === sessionId) this.inflightAbortControllers.get(rpcId)?.abort();
+    }
+    void this.releaseHoverLatch(sessionId);
+    return true;
+  }
+
+  isSessionPaused(sessionId: string): boolean {
+    const ctx = this.sessions.get(sessionId);
+    return ctx !== null && this.pausedSessions.has(ctx);
+  }
+
+  private async resumeSession(sessionId: string, rpcId: string): Promise<unknown | RpcError> {
+    const ctx = this.sessions.get(sessionId);
+    if (!ctx) return { code: "not_found", message: `session ${sessionId} unknown` };
+    // Cancellation acknowledgement is not operation completion. Do not resume
+    // while an old handler could still be sending input or compensating.
+    if ([...this.inflightSessions].some(([id, owner]) => id !== rpcId && owner === sessionId)) {
+      return {
+        code: "protocol_error",
+        message: "session still has an unfinished command; wait for cancellation cleanup before resuming",
+        data: { reason: "session_busy" },
+      };
+    }
+    const epoch = this.pausedSessions.get(ctx);
+    await this.releaseHoverLatch(sessionId);
+    if (this.sessions.get(sessionId) !== ctx || this.pausedSessions.get(ctx) !== epoch) {
+      return { code: "user_aborted", message: "session interrupted again while resuming; still paused" };
+    }
+    this.pausedSessions.delete(ctx);
+    this.onBrowserControlResumed?.(sessionId);
+    return { resumed: true, interrupt_epoch: epoch ?? 0 };
+  }
 
   constructor(deps: DispatcherDeps) {
     this.video = deps.video;
@@ -270,6 +312,7 @@ export class ToolDispatcher {
       }
     }
     this.inflightAbortControllers.clear();
+    this.inflightSessions.clear();
     const exports = this.screenshotExports;
     this.screenshotExports = new ScreenshotExports((id) => this.sessions.has(id));
     void exports.dispose();
@@ -310,6 +353,8 @@ export class ToolDispatcher {
     if (startsSession) this.pendingSessionStarts += 1;
     const ac = new AbortController();
     this.inflightAbortControllers.set(req.id, ac);
+    const requestSessionId = (req.params as { session_id?: string } | undefined)?.session_id;
+    if (requestSessionId) this.inflightSessions.set(req.id, requestSessionId);
     let body: ResponseFrame;
     let startedSession: string | null = null;
     let debugTicket: DebugTicket | undefined;
@@ -318,7 +363,14 @@ export class ToolDispatcher {
         throw new Error("Browser settings are updating; retry session start.");
       }
       const sessionId = sessionIdForBrowserControlMethod(req);
-      if (sessionId) this.onBrowserControlResumed?.(sessionId);
+      if (sessionId && this.isSessionPaused(sessionId)) {
+        const paused: RpcError = {
+          code: "user_aborted",
+          message: "Session paused by user. Ask how to proceed, then explicitly run session resume; no action was replayed.",
+        };
+        this.transport.send({ id: req.id, error: paused });
+        return;
+      }
       // Best-effort context must never prevent the requested operation.
       try {
         const context = await auditContext(req, this.sessions);
@@ -370,6 +422,7 @@ export class ToolDispatcher {
       if (startsSession) this.pendingSessionStarts -= 1;
       this.debug?.after(debugTicket, "operation failed");
       this.inflightAbortControllers.delete(req.id);
+      this.inflightSessions.delete(req.id);
     }
     let sent = true;
     try {
@@ -436,6 +489,10 @@ export class ToolDispatcher {
     );
     if (preparationError) return preparationError;
     switch (req.method) {
+      case "tool.session_resume": {
+        if (!sessionId) return { code: "invalid_params", message: "session.resume requires session_id" };
+        return this.resumeSession(sessionId, req.id);
+      }
       case "tool.video":
         if (!this.video)
           return {
@@ -987,7 +1044,7 @@ export class ToolDispatcher {
   }
 
   private async reassertHover(params: { session_id: string; tab_id?: number }): Promise<void> {
-    if (!this.cdp) return;
+    if (!this.cdp || this.isSessionPaused(params.session_id)) return;
     await Promise.all(
       this.hoverLatchesForRequest(params).map((latch) =>
         this.cdp!.send(latch.tabId, "Input.dispatchMouseEvent", {
@@ -1077,8 +1134,26 @@ function sessionIdForBrowserControlMethod(req: RequestFrame): string | null {
       const sessionId = (req.params as { session_id?: unknown } | undefined)?.session_id;
       return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
     }
-    default:
+    // These paths only read page state or release existing resources.
+    case "tool.session_start":
+    case "tool.session_stop":
+    case "tool.session_resume":
+    case "tool.tab_list":
+    case "tool.snapshot":
+    case "tool.get_html":
+    case "tool.extract":
+    case "tool.screenshot":
+    case "tool.screenshot_read":
+    case "tool.screenshot_release":
+    case "tool.console":
+    case "tool.network":
+    case "tool.record_stop":
       return null;
+    default: {
+      // Unknown/new session tools fail closed while paused.
+      const sessionId = (req.params as { session_id?: unknown } | undefined)?.session_id;
+      return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+    }
   }
 }
 

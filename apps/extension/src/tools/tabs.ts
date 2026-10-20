@@ -266,7 +266,7 @@ export async function handleTabList(
     if (typeof t.id !== "number") continue;
     const winId = typeof t.windowId === "number" ? t.windowId : -1;
     if (otherAgentWindowIds.has(winId)) continue;
-    const tabScope: "user" | "agent" = winId === myAgentWindowId ? "agent" : "user";
+    const tabScope: "user" | "agent" = (ctx.existingWindow ? isAgentControlledTab(ctx, t.id) : winId === myAgentWindowId) ? "agent" : "user";
     if (scope === "user" && tabScope !== "user") continue;
     if (scope === "agent" && tabScope !== "agent") continue;
     tabs.push({
@@ -370,7 +370,7 @@ function buildCreateProps(
   const createProps: chrome.tabs.CreateProperties = {
     windowId: ctx.agentWindowId,
     url: params.url ?? NEW_TAB_DEFAULT_URL,
-    active: params.active ?? true,
+    active: params.active ?? !ctx.existingWindow,
   };
   if (params.index !== undefined) createProps.index = params.index;
   return createProps;
@@ -414,6 +414,7 @@ async function createAndClaimTab(
   // Claim the concrete id returned by Chrome. Ownership never depends on
   // matching this request to an asynchronous onCreated event.
   ctx.agentCreatedTabs.add(tab.id);
+  if (ctx.existingWindow) ctx.defaultTabId ??= tab.id;
   if (aborted(deps.signal, "tab_create")) {
     try {
       await getTabsApi(deps).remove(tab.id);
@@ -550,7 +551,7 @@ async function authoriseAgentTab(
   if (typeof tab.id !== "number" || typeof tab.windowId !== "number") {
     return { code: "not_found", message: `tab ${tabId} not found` };
   }
-  if (ctx.remote && !isAgentControlledTab(ctx, tabId)) {
+  if ((ctx.remote || ctx.existingWindow) && !isAgentControlledTab(ctx, tabId)) {
     return {
       code: "permission_denied",
       message: `${toolName}: borrow this tab before controlling it remotely`,
@@ -613,7 +614,7 @@ export async function handleTabClose(
   }
   try {
     let closeWindow = false;
-    if (detectBrowserMeta().name === "yandex") {
+    if (!ctx.existingWindow && detectBrowserMeta().name === "yandex") {
       const tabs = await (deps.tabsQuery ?? chromeTabsApi).query({ windowId: ctx.agentWindowId });
       if (aborted(deps.signal, "tab_close")) {
         return { code: "cancelled", message: "tab_close aborted" };
@@ -670,6 +671,7 @@ export async function handleTabSelect(
   }
   try {
     await getTabsApi(deps).update(params.tab_id, { active: true });
+    if (ctx.existingWindow) ctx.defaultTabId = params.tab_id;
   } catch (err) {
     return {
       code: "protocol_error",
@@ -746,7 +748,10 @@ async function validateBorrowTarget(
       "borrow_conflict",
       `tab_borrow: tab ${tabId} is already controlled by session ${owner}`,
     );
-  if (tab.windowId === ctx.agentWindowId) {
+  if (ctx.existingWindow && tab.windowId !== ctx.agentWindowId) {
+    return { code: "permission_denied", message: "Existing-window sessions may only borrow tabs in their own window" };
+  }
+  if (!ctx.existingWindow && tab.windowId === ctx.agentWindowId) {
     return {
       code: "invalid_params",
       message:
@@ -872,6 +877,7 @@ async function executeBorrowCore(
 
   const originalWindowId = currentTab.windowId;
   const originalIndex = typeof currentTab.index === "number" ? currentTab.index : 0;
+  if (p.ctx.existingWindow) return { originalWindowId, originalIndex };
   const moveErr = await moveTabForBorrow(
     p.tabsApi,
     p.tabId,
@@ -984,7 +990,7 @@ export async function handleTabBorrow(
       committed = true;
     } catch (err) {
       try {
-        await tabsApi.move(params.tab_id, {
+        if (!ctx.existingWindow) await tabsApi.move(params.tab_id, {
           windowId: coreResult.originalWindowId,
           index: coreResult.originalIndex,
         });
@@ -1012,7 +1018,8 @@ export async function handleTabBorrow(
       if (deps.signal?.aborted || manager.get(ctx.sessionId) !== ctx) {
         throw new Error("Borrow cancelled during background execution setup");
       }
-      await tabsApi.update(params.tab_id, { active: true });
+      if (ctx.existingWindow) ctx.defaultTabId = params.tab_id;
+      else await tabsApi.update(params.tab_id, { active: true });
       if (deps.signal?.aborted || manager.get(ctx.sessionId) !== ctx) {
         throw new Error("Borrow cancelled during background execution setup");
       }
@@ -1199,6 +1206,15 @@ async function returnBorrowedTabCore(
       code: "not_found",
       message: `tab ${tabId} is not borrowed by session ${ctx.sessionId}`,
     };
+  }
+  if (ctx.existingWindow) {
+    const cancelled = aborted(deps.signal, "tab_return");
+    if (cancelled) return cancelled;
+    const tab = await getTabsApi(deps).get(tabId).catch(() => undefined);
+    await releaseReturnedTabState(ctx, tabId, deps);
+    ctx.refStore.invalidateTab(tabId);
+    if (ctx.defaultTabId === tabId) ctx.defaultTabId = ctx.agentCreatedTabs.values().next().value;
+    return { tabId, toWindowId: tab?.windowId ?? entry.originalWindowId, toIndex: tab?.index ?? entry.originalIndex, fallback: false };
   }
   const tabsApi = getTabsApi(deps);
   const windowsApi = getWindowsApi(deps);

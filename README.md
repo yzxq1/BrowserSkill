@@ -1,5 +1,7 @@
 # BrowserSkill
 
+> **定制分支**：支持现有窗口后台追加任务标签页与 Interrupt 后显式恢复。[使用与构建说明](docs/fork-existing-window.zh-CN.md)。
+
 <p align="center">
   <img src="docs/assets/browserskill-readme-banner.png" alt="BrowserSkill — connect your AI agent to your browser" />
 </p>

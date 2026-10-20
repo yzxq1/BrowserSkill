@@ -528,6 +528,13 @@ pub struct BrowserStatusEntry {
 /// Snapshot of a single live session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionStatusEntry {
+    /// Runtime-only pause; not persisted across daemon or browser restarts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_tab_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interaction: Option<crate::tools::InteractionPolicy>,
     pub session_id: String,

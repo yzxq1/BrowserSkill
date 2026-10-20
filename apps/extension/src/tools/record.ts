@@ -888,7 +888,7 @@ export async function handleRecordStart(
   // Cancellation can precede record_await; keep its rejection handled.
   void finishPromise.catch(() => {});
   const isTabAllowed = (tabId: number) =>
-    !ctx.remote || (manager.get(ctx.sessionId) === ctx && isAgentControlledTab(ctx, tabId));
+    !(ctx.remote || ctx.existingWindow) || (manager.get(ctx.sessionId) === ctx && isAgentControlledTab(ctx, tabId));
   const navigateUrl = params.url ?? RECORD_DEFAULT_START_URL;
   const startedAtMs = Date.now();
   const maxPageTokens = params.max_page_tokens;
@@ -917,7 +917,7 @@ export async function handleRecordStart(
             tabsApi: deps.tabsApi,
             maxTokens: maxPageTokens,
             redactValues,
-            isTabAllowed: ctx.remote ? isTabAllowed : undefined,
+            isTabAllowed: ctx.remote || ctx.existingWindow ? isTabAllowed : undefined,
           })
         : null,
     stoppedBy: "user_finish",

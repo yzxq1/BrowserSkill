@@ -1,5 +1,7 @@
 # BrowserSkill
 
+> **此分支为本地定制版**：新增 `session start --window current`，在现有窗口末尾后台追加任务页；新增 `session resume`，明确恢复被 Interrupt 暂停的原会话。默认独立窗口模式保留。见[使用与构建说明](docs/fork-existing-window.zh-CN.md)。
+
 <p align="center">
   <img src="docs/assets/browserskill-readme-banner.png" alt="BrowserSkill — 将 AI Agent 连接到你的浏览器" />
 </p>

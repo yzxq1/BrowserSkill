@@ -193,7 +193,7 @@ describe("ToolDispatcher", () => {
     await flushMicrotasks();
     expect(sessions.has("aa11")).toBe(true);
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toEqual({
+    expect(sent[0]).toMatchObject({
       id: "r-1",
       result: {
         agent_window_id: 4242,
@@ -961,7 +961,7 @@ describe("ToolDispatcher", () => {
       }),
     );
     await vi.waitFor(() => expect(resolveNode).toBeDefined());
-    expect(onBrowserControlResumed).toHaveBeenCalledWith("aa11");
+    expect(onBrowserControlResumed).not.toHaveBeenCalled();
     deliver({ id: "cancel-focus", method: "cancel", params: { rpc_id: "r-1" } });
     resolveNode!({ object: { objectId: "focus-target" } });
     await vi.waitFor(() => expect(sent).toHaveLength(2));
@@ -1001,7 +1001,7 @@ describe("ToolDispatcher", () => {
     dispatcher.stop();
   });
 
-  it("invokes onBrowserControlResumed for browser-control tools but not passive reads", async () => {
+  it("restores the overlay only through explicit session resume, not ordinary tools", async () => {
     vi.stubGlobal("chrome", {
       tabs: {
         create: vi.fn(async (props: chrome.tabs.CreateProperties) => ({
@@ -1043,8 +1043,13 @@ describe("ToolDispatcher", () => {
       id: "r-control",
     });
     await flushMicrotasks();
-    expect(onBrowserControlResumed).toHaveBeenCalledWith("aa11");
+    expect(onBrowserControlResumed).not.toHaveBeenCalled();
     expect(onAgentTabClaimed).toHaveBeenCalledWith(7, 1);
+
+    dispatcher.interruptSession("aa11");
+    deliver({ ...makeRequest("tool.session_resume", { session_id: "aa11" }), id: "r-resume" });
+    await flushMicrotasks();
+    expect(onBrowserControlResumed).toHaveBeenCalledWith("aa11");
   });
 
   it("reasserts remembered hover before follow-up work and releases only after actions", async () => {

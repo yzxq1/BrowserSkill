@@ -46,6 +46,8 @@ fn main() {
 
     dump!(SessionStartParams, "tool_session_start_params");
     dump!(SessionStartResult, "tool_session_start_result");
+    dump!(SessionResumeParams, "tool_session_resume_params");
+    dump!(SessionResumeResult, "tool_session_resume_result");
     dump!(SessionStopParams, "tool_session_stop_params");
     dump!(SessionStopResult, "tool_session_stop_result");
 

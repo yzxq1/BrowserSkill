@@ -198,7 +198,7 @@ export async function resolveTargetTab(
   api: ChromeTabsApi,
 ): Promise<ResolvedTargetTab | RpcError> {
   const target = await resolveVisibleTargetTab(manager, ctx, tabId, api);
-  if (!isRpcError(target) && ctx.remote && !isAgentControlledTab(ctx, target.tabId)) {
+  if (!isRpcError(target) && (ctx.remote || ctx.existingWindow) && !isAgentControlledTab(ctx, target.tabId)) {
     return {
       code: "permission_denied",
       message: "Authorize this tab with tab_borrow before reading or operating it",
@@ -253,6 +253,12 @@ async function resolveVisibleTargetTab(
       url: tab.url,
       pendingUrl: tab.pendingUrl,
     };
+  }
+  if (ctx.existingWindow) {
+    if (ctx.defaultTabId === undefined || !isAgentControlledTab(ctx, ctx.defaultTabId)) {
+      return { code: "not_found", message: "No default task tab; create or borrow a task tab" };
+    }
+    return resolveVisibleTargetTab(manager, ctx, ctx.defaultTabId, api);
   }
   const tabs = await api.query({ active: true, windowId: ctx.agentWindowId });
   let first = tabs.find((t) => typeof t.id === "number");
@@ -377,11 +383,11 @@ export async function resolveCdpAccessibleTargetTab(
 
   const restricted = enforceCdpAccessibleTarget(target, toolName);
   if (!restricted) return target;
-  if (tabId !== undefined) return restricted;
+  if (tabId !== undefined || ctx.existingWindow) return restricted;
 
   const tabs = await api.query({ windowId: ctx.agentWindowId });
   for (const tab of tabs) {
-    if (ctx.remote && (tab.id === undefined || !isAgentControlledTab(ctx, tab.id))) continue;
+    if ((ctx.remote || ctx.existingWindow) && (tab.id === undefined || !isAgentControlledTab(ctx, tab.id))) continue;
     if (tab.id !== undefined && isPendingTabRouting(ctx, tab.id)) continue;
     const candidate = resolvedTargetFromChromeTab(tab, ctx.agentWindowId);
     if (!candidate) continue;
@@ -403,7 +409,7 @@ export function enforceAgentWindow(
   target: { tabId: number; windowId: number },
   toolName: string,
 ): RpcError | null {
-  if (ctx.remote && !isAgentControlledTab(ctx, target.tabId)) {
+  if ((ctx.remote || ctx.existingWindow) && !isAgentControlledTab(ctx, target.tabId)) {
     return {
       code: "permission_denied",
       message: "This tab has not been authorized for the remote task",
@@ -429,6 +435,6 @@ export function enforceToolTargetScope(
   effect: ToolEffect,
   toolName: string,
 ): RpcError | null {
-  if (effect === "passive_read" && !ctx.remote) return null;
+  if (effect === "passive_read" && !ctx.remote && !ctx.existingWindow) return null;
   return enforceAgentWindow(ctx, target, toolName);
 }

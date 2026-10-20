@@ -42,6 +42,8 @@ pub struct SessionCmd {
 pub enum SessionSub {
     /// Start a new session against the (single) connected browser.
     Start(SessionStartArgs),
+    /// Resume only after the user explicitly asks to continue.
+    Resume { session_id: String },
     /// Stop a single session, or all sessions with `--all`.
     Stop(SessionStopArgs),
     /// List active sessions.
@@ -52,6 +54,9 @@ pub enum SessionSub {
 
 #[derive(Debug, Clone, Args)]
 pub struct SessionStartArgs {
+    /// Append a background tab to an existing normal window.
+    #[arg(long = "window", value_parser = existing_window, conflicts_with_all = ["incognito", "width", "height", "focus"])]
+    pub window_id: Option<i64>,
     /// Deprecated compatibility flag. Automation settings in the extension take precedence.
     #[arg(long)]
     pub unattended: bool,
@@ -87,6 +92,12 @@ pub struct SessionStartArgs {
     /// Bring the new Agent Window to the foreground.
     #[arg(long)]
     pub focus: bool,
+}
+
+fn existing_window(value: &str) -> Result<i64, String> {
+    if value == "current" { return Ok(-1); }
+    value.parse::<i64>().ok().filter(|id| *id > 0)
+        .ok_or_else(|| "--window expects current or a positive window ID".into())
 }
 
 /// Parse a `--width` / `--height` Agent Window dimension (CSS pixels).
@@ -127,6 +138,8 @@ pub struct SessionRequestArgs {
 
 #[derive(Debug, Serialize)]
 struct StartParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    window_id: Option<i64>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     incognito: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -145,6 +158,10 @@ struct StartParams {
 
 #[derive(Debug, Deserialize)]
 pub struct StartReply {
+    #[serde(default)]
+    pub default_tab_id: Option<i64>,
+    #[serde(default)]
+    pub window_mode: Option<String>,
     #[serde(default)]
     pub interaction: Option<bsk_protocol::tools::InteractionPolicy>,
     pub session_id: String,
@@ -193,6 +210,14 @@ pub fn dispatch(cmd: SessionCmd, format: Format) -> Result<(), CliError> {
                 run_skill_sync_for_session_start(format);
             }
             run_start(info.sock_path, args, format)
+        }
+        SessionSub::Resume { session_id } => {
+            crate::cli::protocol::require_daemon_support(&info.sock_path, "session resume",
+                bsk_protocol::tools::SESSION_CONTROL_PROTOCOL, bsk_protocol::tools::supports_session_control)?;
+            let reply: serde_json::Value = call(info.sock_path, Method::SessionResume,
+                Some(serde_json::json!({"session_id":session_id})), Duration::from_secs(40))?;
+            println!("{}", serde_json::to_string_pretty(&reply).context("encode resume result")?);
+            Ok(())
         }
         SessionSub::Stop(args) => run_stop(info.sock_path, args, format),
         SessionSub::List => run_list(info.sock_path, format),
@@ -249,6 +274,7 @@ fn run_start(sock: PathBuf, args: SessionStartArgs, format: Format) -> Result<()
     let result = start_session(
         sock,
         SessionStartOptions {
+            window_id: args.window_id,
             incognito: args.incognito,
             name: args.name,
             request_id: args.request_id,
@@ -268,6 +294,8 @@ fn run_start(sock: PathBuf, args: SessionStartArgs, format: Format) -> Result<()
                         "session_id": reply.session_id,
                         "browser_instance_id": reply.browser_instance_id,
                         "agent_window_id": reply.agent_window_id,
+                        "default_tab_id": reply.default_tab_id,
+                        "window_mode": reply.window_mode,
                         "interaction": reply.interaction,
                     }))
                     .map_err(|e| CliError::Local(anyhow::anyhow!(e)))?
@@ -287,6 +315,7 @@ fn run_start(sock: PathBuf, args: SessionStartArgs, format: Format) -> Result<()
 /// (background window, browser-chosen size).
 #[derive(Debug, Default, Clone)]
 pub struct SessionStartOptions {
+    pub window_id: Option<i64>,
     pub incognito: bool,
     pub request_id: Option<String>,
     pub name: Option<String>,
@@ -298,6 +327,13 @@ pub struct SessionStartOptions {
 
 /// Start a session and open the Agent Window. Used by `session start` and `record start`.
 pub fn start_session(sock: PathBuf, opts: SessionStartOptions) -> Result<StartReply, CliError> {
+    if let Some(id) = opts.window_id {
+        if (id != -1 && id <= 0) || opts.incognito || opts.width.is_some() || opts.height.is_some() || opts.focused == Some(true) {
+            return Err(CliError::Local(anyhow::anyhow!("--window requires current or a positive ID and conflicts with incognito, size and focus")));
+        }
+        crate::cli::protocol::require_daemon_support(&sock, "session start --window",
+            bsk_protocol::tools::SESSION_CONTROL_PROTOCOL, bsk_protocol::tools::supports_session_control)?;
+    }
     if opts.incognito {
         crate::cli::protocol::require_daemon_support(
             &sock,
@@ -314,6 +350,7 @@ pub fn start_session(sock: PathBuf, opts: SessionStartOptions) -> Result<StartRe
             Method::SessionStart
         },
         Some(StartParams {
+            window_id: opts.window_id,
             incognito: opts.incognito,
             request_id: opts.request_id,
             task_name: opts.name,
@@ -694,6 +731,7 @@ mod start_params_tests {
     fn start_params_send_task_name_without_policy_overrides() {
         for task_name in [None, Some("Check settings".to_string())] {
             let params = StartParams {
+                window_id: None,
                 incognito: false,
                 request_id: None,
                 task_name: task_name.clone(),

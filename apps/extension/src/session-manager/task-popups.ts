@@ -18,7 +18,7 @@ export async function withTaskPopups<T>(
 ): Promise<T> {
   const task = params.session_id ? manager.get(params.session_id) : null;
   const targets = globalThis.chrome?.webNavigation?.onCreatedNavigationTarget;
-  if (!task || !targets || signal?.aborted) return run(() => {});
+  if (!task || task.existingWindow || !targets || signal?.aborted) return run(() => {});
   const focus = watchPopupFocus(task.agentWindowId);
   let observedPopup = false;
   let finishCreation: (() => void) | undefined;

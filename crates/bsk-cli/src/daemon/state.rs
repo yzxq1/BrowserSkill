@@ -17,7 +17,7 @@ use super::start::DaemonConfig;
 use super::ws::WsHandle;
 
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const PROTOCOL_VERSION: &str = "1.4";
+pub const PROTOCOL_VERSION: &str = "1.5";
 /// Base wire compatibility. New interaction semantics are checked per operation.
 pub const MIN_COMPATIBLE_PROTOCOL: &str = "1.0";
 /// Legacy app-semver floor used only when `HandshakeResult.min_compatible_peer`
@@ -46,13 +46,8 @@ pub struct DaemonState {
     /// translated into a WS-side cancel frame addressed to the
     /// matching browser (M10.2).
     pub tool_inflight: Arc<ToolInflightRegistry>,
-    /// Per-session "pending interrupt" signal. The WS event handler
-    /// `mark`s the session when the user clicks the agent-window
-    /// mask's stop button; the IPC tool-dispatch handler
-    /// `try_consume`s on the way in so the next browser-input-dispatching
-    /// tool call is rejected with `UserAborted`. Independent of
-    /// `SessionRegistry` because the signal is a transient runtime
-    /// control state.
+    /// Runtime-only persistent pause. Every interrupt advances a generation;
+    /// only explicit extension-confirmed resume may compare-and-clear it.
     pub session_interrupts: Arc<SessionInterruptRegistry>,
     /// Operation-scoped local file staging. The extension only sees paths
     /// minted here; agent-facing RPCs use opaque transfer ids.

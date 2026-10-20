@@ -11,6 +11,23 @@ pub const INTERACTION_POLICY_PROTOCOL: &str = "1.3";
 /// Protocol 1.4 supports explicitly requested incognito Agent Windows.
 pub const INCOGNITO_SESSION_PROTOCOL: &str = "1.4";
 
+/// Protocol 1.5 supports existing windows and explicit interrupt recovery.
+pub const SESSION_CONTROL_PROTOCOL: &str = "1.5";
+pub fn supports_session_control(protocol: &str) -> bool {
+    crate::system::compare_protocol(protocol, "2.0") == Some(std::cmp::Ordering::Less)
+        && matches!(crate::system::compare_protocol(protocol, SESSION_CONTROL_PROTOCOL),
+            Some(std::cmp::Ordering::Equal | std::cmp::Ordering::Greater))
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SessionResumeParams { pub session_id: String }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SessionResumeResult {
+    pub resumed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupt_epoch: Option<u64>,
+}
+
 pub fn supports_incognito_sessions(protocol: &str) -> bool {
     crate::system::compare_protocol(protocol, "2.0") == Some(std::cmp::Ordering::Less)
         && matches!(
@@ -51,6 +68,10 @@ pub struct InteractionPolicy {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionStartParams {
+    /// Append a background tab to this normal window; -1 selects the current
+    /// user window (reject ambiguous candidates). Other IDs must be positive. Never fall back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<i64>,
     pub session_id: String,
     /// Use Chrome's shared incognito browsing session. Omitted means normal.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -75,6 +96,10 @@ pub struct SessionStartParams {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionStartResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_tab_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interaction: Option<InteractionPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -1,7 +1,10 @@
 import { AGENT_WINDOW_HOME, type AgentWindowApi, chromeAgentWindowApi } from "./agent-window";
 import { RefStore } from "./ref-store";
+import { chromeExistingWindowApi, type ExistingWindowApi } from "./existing-window";
 
 export interface SessionContext {
+  existingWindow?: boolean;
+  defaultTabId?: number;
   /** Incognito sessions cannot borrow user tabs. Absent means a normal window. */
   incognito?: boolean;
   /** Remote connections retain dedicated windows, with explicit page ownership. */
@@ -46,11 +49,13 @@ export interface BorrowReservation {
 export interface SessionManagerOptions {
   remote?: () => boolean;
   agentWindow?: AgentWindowApi;
+  existingWindow?: ExistingWindowApi;
   now?: () => number;
 }
 
 /** Options for starting a session's Agent Window. */
 export interface SessionStartOptions {
+  windowId?: number;
   /** Use Chrome's shared incognito browsing session. */
   incognito?: boolean;
   /** Optional Agent Window outer size in CSS pixels. */
@@ -108,11 +113,15 @@ export class SessionManager {
   private readonly sessions = new Map<string, SessionContext>();
   private readonly windowIndex = new Map<number, string>();
   private readonly borrowReservations = new Map<number, string>();
+  private readonly startingSessions = new Set<string>();
+  private readonly windowReservations = new Map<number, string>();
+  private readonly existingWindow: ExistingWindowApi;
   private readonly expectedWindowClosures = new WeakSet<SessionContext>();
   private readonly agentWindow: AgentWindowApi;
   private readonly now: () => number;
 
   constructor(options: SessionManagerOptions = {}) {
+    this.existingWindow = options.existingWindow ?? chromeExistingWindowApi;
     this.remote = options.remote ?? (() => false);
     this.agentWindow = options.agentWindow ?? chromeAgentWindowApi;
     this.now = options.now ?? Date.now;
@@ -252,14 +261,61 @@ export class SessionManager {
    * daemon in the `tool.session_start` reply.
    */
   async start(sessionId: string, opts: SessionStartOptions = {}): Promise<SessionContext> {
-    if (this.sessions.has(sessionId)) {
+    if (this.sessions.has(sessionId) || this.startingSessions.has(sessionId)) {
       throw new Error(`[bh] session ${sessionId} already exists`);
     }
     throwIfSessionStartAborted(opts.signal);
 
+    if (opts.windowId === -1) {
+      if (opts.incognito !== undefined || opts.size !== undefined || opts.focused === true) {
+        throw new Error("Invalid existing window options");
+      }
+      this.startingSessions.add(sessionId);
+      let resolved: number;
+      try {
+        resolved = await this.existingWindow.resolveCurrentWindow(new Set([
+          ...this.windowIndex.keys(), ...this.windowReservations.keys(),
+        ]));
+        if (!Number.isSafeInteger(resolved) || resolved <= 0) throw new Error("No current user window available");
+      } finally {
+        this.startingSessions.delete(sessionId);
+      }
+      // The numeric path rechecks and synchronously reserves the selected id.
+      return this.start(sessionId, { ...opts, windowId: resolved });
+    }
+    if (opts.windowId !== undefined) {
+      if (!Number.isSafeInteger(opts.windowId) || opts.windowId <= 0 || opts.incognito !== undefined || opts.size !== undefined || opts.focused === true) {
+        throw new Error("Invalid existing window options");
+      }
+      if (this.windowIndex.has(opts.windowId) || this.windowReservations.has(opts.windowId)) {
+        throw new Error("Window already belongs to a session or pending session_start");
+      }
+      // Reserve synchronously before the first awaited browser call.
+      this.windowReservations.set(opts.windowId, sessionId);
+    }
+    this.startingSessions.add(sessionId);
     let windowId: number | null = null;
     const agentCreatedTabs = new Set<number>();
     try {
+      if (opts.windowId !== undefined) {
+        const win = await this.existingWindow.get(opts.windowId);
+        if (win.id !== opts.windowId || win.type !== "normal" || win.incognito) {
+          throw new Error("window_id must identify an existing normal non-incognito window");
+        }
+        throwIfSessionStartAborted(opts.signal);
+        const tabId = await this.existingWindow.createTaskTab(opts.windowId);
+        // Cancellation releases authority only; never delete a user window or its pages.
+        throwIfSessionStartAborted(opts.signal);
+        const ctx: SessionContext = {
+          existingWindow: true, defaultTabId: tabId, incognito: false,
+          ...(this.remote() ? { remote: true } : {}),
+          sessionId, agentWindowId: opts.windowId, refStore: new RefStore(),
+          borrowedTabs: new Map(), agentCreatedTabs: new Set([tabId]), createdAtMs: this.now(),
+        };
+        this.sessions.set(sessionId, ctx);
+        this.windowIndex.set(opts.windowId, sessionId);
+        return ctx;
+      }
       const { signal: _signal, ...createOptions } = opts;
       const created = await this.agentWindow.create(AGENT_WINDOW_HOME, createOptions);
       windowId = created.windowId;
@@ -279,6 +335,7 @@ export class SessionManager {
       throwIfSessionStartAborted(opts.signal);
 
       const ctx: SessionContext = {
+        defaultTabId: homeTabId,
         incognito: created.incognito ?? false,
         ...(this.remote() ? { remote: true } : {}),
         sessionId,
@@ -317,6 +374,11 @@ export class SessionManager {
         }
       }
       throw startupError;
+    } finally {
+      this.startingSessions.delete(sessionId);
+      if (opts.windowId !== undefined && this.windowReservations.get(opts.windowId) === sessionId) {
+        this.windowReservations.delete(opts.windowId);
+      }
     }
   }
 
@@ -333,11 +395,19 @@ export class SessionManager {
   ): Promise<SessionContext | null> {
     const ctx = this.sessions.get(sessionId);
     if (!ctx) return null;
-    if (!options.dropOnly) {
+    if (!options.dropOnly && !ctx.existingWindow) {
       await this.agentWindow.remove(ctx.agentWindowId);
     }
     this.sessions.delete(sessionId);
     this.windowIndex.delete(ctx.agentWindowId);
+    if (ctx.existingWindow) {
+      ctx.refStore.clear();
+      ctx.agentCreatedTabs.clear();
+      ctx.borrowedTabs.clear();
+      ctx.observedTabs?.clear();
+      ctx.pendingRoutingTabs?.clear();
+      ctx.defaultTabId = undefined;
+    }
     return ctx;
   }
 
