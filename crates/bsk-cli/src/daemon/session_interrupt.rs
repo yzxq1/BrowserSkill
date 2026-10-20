@@ -1,201 +1,65 @@
-//! Per-session "pending interrupt" message.
-//!
-//! Holds a single-use marker per `SessionId` indicating that the
-//! user has clicked the agent-window mask's stop button. The next
-//! browser-input-dispatching `tool.*` call for that session is rejected
-//! with `ErrorCode::UserAborted`; passive reads and session-lifecycle
-//! RPCs pass through transparently and do not consume the marker.
-//!
-//! The marker is single-use and has no expiry: it sits in the
-//! registry until consumed by an input-dispatching call or until the
-//! session is torn down. This lets the user's interrupt survive an LLM
-//! thinking phase of arbitrary length — the v1 time-window
-//! mechanism dropped interrupts whenever the LLM took longer to
-//! respond than the window allowed.
-//!
-//! Independent of `SessionRegistry` because the signal is a
-//! transient runtime control state, not a session lifecycle
-//! attribute.
-
-use std::collections::HashSet;
+//! Persistent per-session pause. Only an extension-confirmed explicit resume
+//! may clear it; every interrupt advances a generation to invalidate old resumes.
+use std::collections::HashMap;
 use std::sync::Mutex;
-
 use super::sessions::SessionId;
 
-#[derive(Default)]
-pub struct SessionInterruptRegistry {
-    inner: Mutex<HashSet<SessionId>>,
-}
-
-impl std::fmt::Debug for SessionInterruptRegistry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let len = self.inner.lock().map(|g| g.len()).unwrap_or(0);
-        f.debug_struct("SessionInterruptRegistry")
-            .field("len", &len)
-            .finish()
-    }
-}
-
+#[derive(Debug, Default)]
+struct State { next: u64, paused: HashMap<SessionId, u64> }
+#[derive(Debug, Default)]
+pub struct SessionInterruptRegistry { inner: Mutex<State> }
 impl SessionInterruptRegistry {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Mark `sid` as having a pending interrupt. Idempotent —
-    /// repeated marks are a no-op (the marker is a single-use flag,
-    /// not a counter).
+    pub fn new() -> Self { Self::default() }
     pub fn mark(&self, sid: &SessionId) {
-        let mut guard = self.inner.lock().expect("session_interrupt poisoned");
-        guard.insert(sid.clone());
+        let mut state = self.inner.lock().expect("session_interrupt poisoned");
+        state.next = state.next.checked_add(1).expect("interrupt generation exhausted");
+        let generation = state.next;
+        state.paused.insert(sid.clone(), generation);
     }
-
-    /// Whether `sid` currently has a pending interrupt marker.
-    pub fn is_pending(&self, sid: &SessionId) -> bool {
-        let guard = self.inner.lock().expect("session_interrupt poisoned");
-        guard.contains(sid)
+    pub fn generation(&self, sid: &SessionId) -> Option<u64> {
+        self.inner.lock().expect("session_interrupt poisoned").paused.get(sid).copied()
     }
-
-    /// Probe + consume. If `sid` has a pending interrupt, remove it
-    /// and return `true`. Otherwise return `false` without
-    /// modifying the registry.
-    ///
-    /// Single-use semantics: once consumed by one call, subsequent
-    /// `try_consume` calls for the same session return `false`
-    /// until the session is marked again.
-    pub fn try_consume(&self, sid: &SessionId) -> bool {
-        let mut guard = self.inner.lock().expect("session_interrupt poisoned");
-        guard.remove(sid)
+    pub fn is_pending(&self, sid: &SessionId) -> bool { self.generation(sid).is_some() }
+    /// Compare-and-clear after the extension confirms resume. A newer interrupt wins.
+    pub fn clear_if_generation(&self, sid: &SessionId, generation: Option<u64>) -> bool {
+        let mut state = self.inner.lock().expect("session_interrupt poisoned");
+        if state.paused.get(sid).copied() != generation { return false; }
+        state.paused.remove(sid);
+        true
     }
-
-    /// Drop any pending entry for `sid`. **Every** session-teardown
-    /// path MUST call this so a session torn down while a signal
-    /// was hot does not leak the entry into the registry
-    /// indefinitely. Current call sites:
-    ///
-    /// * `stop_session` (session.stop RPC)
-    /// * `forget_session` (extension closed the agent window)
-    /// * `purge_browser` cascade (browser disconnect — see
-    ///   `daemon/ws.rs`)
-    ///
-    /// If a future code path adds a fourth teardown route, add the
-    /// `drop_session` call there too — there is no static check
-    /// enforcing this.
     pub fn drop_session(&self, sid: &SessionId) {
-        let mut guard = self.inner.lock().expect("session_interrupt poisoned");
-        guard.remove(sid);
+        self.inner.lock().expect("session_interrupt poisoned").paused.remove(sid);
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn sid(s: &str) -> SessionId {
-        SessionId(s.to_string())
+    fn sid(s: &str) -> SessionId { SessionId(s.into()) }
+    #[test] fn pause_is_persistent_until_explicit_resume() {
+        let reg = SessionInterruptRegistry::new(); let a = sid("A");
+        assert!(!reg.is_pending(&a)); reg.mark(&a);
+        for _ in 0..10 { assert!(reg.is_pending(&a)); }
+        assert!(reg.clear_if_generation(&a, reg.generation(&a)));
+        assert!(!reg.is_pending(&a));
     }
-
-    #[test]
-    fn new_registry_is_empty() {
-        let reg = SessionInterruptRegistry::new();
-        assert!(reg.inner.lock().unwrap().is_empty());
+    #[test] fn newer_interrupt_invalidates_resume() {
+        let reg = SessionInterruptRegistry::new(); let a = sid("A");
+        reg.mark(&a); let generation = reg.generation(&a); reg.mark(&a);
+        assert!(!reg.clear_if_generation(&a, generation)); assert!(reg.is_pending(&a));
     }
-
-    #[test]
-    fn mark_inserts_an_entry() {
-        let reg = SessionInterruptRegistry::new();
-        reg.mark(&sid("A"));
-        assert!(reg.inner.lock().unwrap().contains(&sid("A")));
+    #[test] fn idempotent_resume_still_detects_new_interrupt() {
+        let reg = SessionInterruptRegistry::new(); let a = sid("A");
+        assert!(reg.clear_if_generation(&a, None)); reg.mark(&a);
+        assert!(!reg.clear_if_generation(&a, None));
     }
-
-    #[test]
-    fn mark_is_idempotent_per_session() {
-        let reg = SessionInterruptRegistry::new();
-        reg.mark(&sid("A"));
-        reg.mark(&sid("A"));
-        assert_eq!(reg.inner.lock().unwrap().len(), 1);
+    #[test] fn teardown_does_not_allow_generation_reuse() {
+        let reg = SessionInterruptRegistry::new(); let a = sid("A");
+        reg.mark(&a); let old = reg.generation(&a); reg.drop_session(&a); reg.mark(&a);
+        assert!(!reg.clear_if_generation(&a, old));
     }
-
-    #[test]
-    fn mark_distinguishes_sessions() {
-        let reg = SessionInterruptRegistry::new();
-        reg.mark(&sid("A"));
-        reg.mark(&sid("B"));
-        assert_eq!(reg.inner.lock().unwrap().len(), 2);
-    }
-
-    #[test]
-    fn is_pending_reflects_mark_without_consuming() {
-        let reg = SessionInterruptRegistry::new();
-        assert!(!reg.is_pending(&sid("A")));
-        reg.mark(&sid("A"));
-        assert!(reg.is_pending(&sid("A")));
-        assert!(reg.try_consume(&sid("A")));
-        assert!(!reg.is_pending(&sid("A")));
-    }
-
-    #[test]
-    fn try_consume_on_unmarked_session_returns_false() {
-        let reg = SessionInterruptRegistry::new();
-        assert!(!reg.try_consume(&sid("ghost")));
-        assert!(reg.inner.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn try_consume_after_mark_returns_true_and_removes() {
-        let reg = SessionInterruptRegistry::new();
-        reg.mark(&sid("A"));
-        assert!(reg.try_consume(&sid("A")));
-        assert!(!reg.inner.lock().unwrap().contains(&sid("A")));
-    }
-
-    #[test]
-    fn try_consume_is_single_use() {
-        // Two consecutive consumes: only the first wins.
-        let reg = SessionInterruptRegistry::new();
-        reg.mark(&sid("A"));
-        assert!(reg.try_consume(&sid("A")));
-        assert!(!reg.try_consume(&sid("A")));
-    }
-
-    #[test]
-    fn try_consume_does_not_affect_other_sessions() {
-        let reg = SessionInterruptRegistry::new();
-        reg.mark(&sid("A"));
-        reg.mark(&sid("B"));
-        assert!(reg.try_consume(&sid("A")));
-        assert!(reg.inner.lock().unwrap().contains(&sid("B")));
-    }
-
-    #[test]
-    fn drop_session_clears_pending_entry() {
-        let reg = SessionInterruptRegistry::new();
-        reg.mark(&sid("A"));
-        reg.drop_session(&sid("A"));
-        assert!(!reg.inner.lock().unwrap().contains(&sid("A")));
-    }
-
-    #[test]
-    fn drop_session_on_unknown_session_is_noop() {
-        let reg = SessionInterruptRegistry::new();
-        reg.drop_session(&sid("ghost"));
-        assert!(reg.inner.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn drop_session_does_not_affect_other_sessions() {
-        let reg = SessionInterruptRegistry::new();
-        reg.mark(&sid("A"));
-        reg.mark(&sid("B"));
-        reg.drop_session(&sid("A"));
-        assert!(!reg.inner.lock().unwrap().contains(&sid("A")));
-        assert!(reg.inner.lock().unwrap().contains(&sid("B")));
-    }
-
-    #[test]
-    fn drop_session_after_mark_makes_subsequent_try_consume_return_false() {
-        let reg = SessionInterruptRegistry::new();
-        reg.mark(&sid("A"));
-        reg.drop_session(&sid("A"));
-        assert!(!reg.try_consume(&sid("A")));
+    #[test] fn sessions_are_independent() {
+        let reg = SessionInterruptRegistry::new(); let a = sid("A"); let b = sid("B");
+        reg.mark(&a); reg.mark(&b); reg.drop_session(&a);
+        assert!(!reg.is_pending(&a)); assert!(reg.is_pending(&b));
     }
 }

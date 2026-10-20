@@ -54,6 +54,7 @@ export function validateWindowSize(
 
 export interface SessionStartParams {
   session_id: string;
+  window_id?: number;
   /** Opt in to Chrome's shared incognito browsing session. */
   incognito?: boolean;
   browser_instance_id?: string;
@@ -68,6 +69,8 @@ export interface SessionStartParams {
 }
 
 export interface SessionStartResult {
+  default_tab_id?: number;
+  window_mode?: "dedicated" | "existing";
   interaction?: InteractionPolicy;
   agent_window_id?: number;
 }
@@ -138,11 +141,16 @@ export async function handleSessionStart(
   if (params.incognito !== undefined && typeof params.incognito !== "boolean") {
     return { code: "invalid_params", message: "incognito must be a boolean" };
   }
+  if (params.window_id !== undefined && (
+    !Number.isSafeInteger(params.window_id) || (params.window_id !== -1 && params.window_id <= 0) ||
+    params.incognito !== undefined || params.width !== undefined || params.height !== undefined || params.focused === true
+  )) return { code: "invalid_params", message: "window_id must be -1 (current) or a positive integer; it conflicts with incognito, width, height and focused:true" };
   const sizeOrErr = validateWindowSize(params.width, params.height);
   if (isRpcError(sizeOrErr)) return sizeOrErr;
   try {
     await deps.preferences?.readyOrFallback();
     const ctx = await manager.start(params.session_id, {
+      windowId: params.window_id,
       incognito: params.incognito,
       size: sizeOrErr,
       focused: params.focused,
@@ -150,6 +158,8 @@ export async function handleSessionStart(
     });
     return {
       agent_window_id: ctx.agentWindowId,
+      default_tab_id: ctx.defaultTabId,
+      window_mode: ctx.existingWindow ? "existing" : "dedicated",
       interaction: interactionPolicy(deps.preferences?.get() ?? DEFAULT_INTERACTION_PREFERENCES),
     };
   } catch (err) {
@@ -315,6 +325,18 @@ async function stopSession(
 
   if (deps.signal?.aborted) {
     return { code: "cancelled", message: "session_stop aborted before window close" };
+  }
+
+  if (ctx.existingWindow) {
+    const controlled = new Set([...ctx.agentCreatedTabs, ...ctx.borrowedTabs.keys(), ...(ctx.observedTabs ?? [])]);
+    await manager.stop(params.session_id, { dropOnly: true });
+    const reset = deps.tabManagement?.agentOverlayReset ?? chromeAgentOverlayResetApi;
+    for (const tabId of controlled) void reset.resetAgentOverlays(tabId, ctx.sessionId).catch(() => {});
+    ctx.agentCreatedTabs.clear();
+    ctx.borrowedTabs.clear();
+    ctx.observedTabs?.clear();
+    ctx.defaultTabId = undefined;
+    return { ...result, window_released: true };
   }
 
   return manager.withExpectedWindowClose(ctx, async () => {

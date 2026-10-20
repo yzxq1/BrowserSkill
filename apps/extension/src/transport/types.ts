@@ -1115,3 +1115,31 @@ export interface RecordAwaitParams {
 export interface RecordAwaitResult {
   trace: RecordedTrace;
 }
+
+// Protocol 1.5 session lifecycle mirrors. Lifecycle implementations may keep
+// their own structural aliases; these define the common wire contract.
+export interface SessionStartParams {
+  session_id: string;
+  /** -1 selects current user normal window; otherwise a positive window ID. */
+  window_id?: number;
+  incognito?: boolean;
+  browser_instance_id?: string;
+  width?: number;
+  height?: number;
+  focused?: boolean;
+}
+export interface SessionStartResult {
+  interaction?: InteractionPolicy;
+  agent_window_id?: number;
+  default_tab_id?: number;
+  window_mode?: "dedicated" | "existing";
+}
+export interface SessionStatusEntry extends SessionStartResult {
+  session_id: string;
+  browser_instance_id: string;
+  created_at_ms: number;
+  /** Runtime only; not recovered across process restarts. */
+  paused?: boolean;
+}
+export interface SessionResumeParams { session_id: string; }
+export interface SessionResumeResult { resumed: boolean; interrupt_epoch?: number; }

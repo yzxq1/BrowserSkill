@@ -341,6 +341,11 @@ impl ToolInflightRegistry {
         self.inner.lock().expect("tool inflight poisoned").len()
     }
 
+    pub fn has_session(&self, sid: &SessionId) -> bool {
+        self.inner.lock().expect("tool inflight poisoned").values()
+            .any(|entry| &entry.inner.lock().expect("inflight entry poisoned").session_id == sid)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

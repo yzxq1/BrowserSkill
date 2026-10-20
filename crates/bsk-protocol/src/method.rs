@@ -42,6 +42,8 @@ pub enum Method {
     SessionRequest,
     #[serde(rename = "session.stop")]
     SessionStop,
+    #[serde(rename = "session.resume")]
+    SessionResume,
     #[serde(rename = "session.stop_all")]
     SessionStopAll,
     #[serde(rename = "session.list")]
@@ -54,6 +56,8 @@ pub enum Method {
     ToolSessionStart,
     #[serde(rename = "tool.session_stop")]
     ToolSessionStop,
+    #[serde(rename = "tool.session_resume")]
+    ToolSessionResume,
     #[serde(rename = "tool.window_resize")]
     ToolWindowResize,
     #[serde(rename = "tool.emulate")]
@@ -240,6 +244,8 @@ impl Method {
             | Method::SessionStartTracked
             | Method::SessionRequest
             | Method::SessionStop
+            | Method::SessionResume
+            | Method::ToolSessionResume
             | Method::SessionStopAll
             | Method::SessionList
             | Method::ToolSessionStart

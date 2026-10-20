@@ -178,6 +178,8 @@ async fn respond_to_aborted_start(
             id: start.id,
             body: ResponseBody::Ok(
                 serde_json::to_value(SessionStartResult {
+    default_tab_id: None,
+    window_mode: None,
                     interaction: None,
                     agent_window_id: Some(agent_window_id),
                 })
@@ -214,6 +216,8 @@ async fn respond_to_aborted_stop(
             id: start.id,
             body: ResponseBody::Ok(
                 serde_json::to_value(SessionStartResult {
+    default_tab_id: None,
+    window_mode: None,
                     interaction: None,
                     agent_window_id: Some(4242),
                 })
@@ -345,6 +349,7 @@ async fn cli_incognito_start_refuses_an_old_daemon_before_dispatching_a_start() 
         start_session(
             path,
             SessionStartOptions {
+    window_id: None,
                 incognito: true,
                 ..Default::default()
             },
@@ -405,6 +410,8 @@ async fn session_start_stop_round_trip_via_ipc() {
                             serde_json::from_value(req.params.clone().unwrap()).unwrap();
                         assert_eq!(params.focused, Some(false));
                         let result = SessionStartResult {
+    default_tab_id: None,
+    window_mode: None,
                             interaction: None,
                             agent_window_id: Some(4242),
                         };
@@ -750,6 +757,8 @@ async fn session_idle_timeout_stops_and_unregisters_session() {
     let state = handle.state();
     let session_id = bsk::daemon::sessions::SessionId("idle".into());
     state.sessions.insert(bsk::daemon::sessions::Session {
+    default_tab_id: None,
+    window_mode: None,
         interaction: None,
 
         id: session_id.clone(),
@@ -841,6 +850,8 @@ async fn session_start_waits_for_late_extension_handshake() {
                 continue;
             }
             let result = SessionStartResult {
+    default_tab_id: None,
+    window_mode: None,
                 interaction: None,
                 agent_window_id: Some(4242),
             };
@@ -981,6 +992,8 @@ async fn session_start_with_browser_instance_id_picks_target() {
                 && req.method == Method::ToolSessionStart
             {
                 let result = SessionStartResult {
+    default_tab_id: None,
+    window_mode: None,
                     interaction: None,
                     agent_window_id: Some(123),
                 };
@@ -1086,6 +1099,8 @@ async fn session_start_label_match_picks_target() {
                 && req.method == Method::ToolSessionStart
             {
                 let result = SessionStartResult {
+    default_tab_id: None,
+    window_mode: None,
                     interaction: None,
                     agent_window_id: Some(456),
                 };
@@ -1174,6 +1189,8 @@ async fn session_window_closed_event_purges_session() {
     let _ = handshake_as_ext(&mut ws).await;
     let state = handle.state();
     let session = bsk::daemon::sessions::Session {
+    default_tab_id: None,
+    window_mode: None,
         interaction: None,
 
         id: bsk::daemon::sessions::SessionId("zzzz".into()),
@@ -1213,6 +1230,8 @@ async fn browser_disconnect_purges_sessions() {
     // post-start state without bothering with the round-trip.
     let state = handle.state();
     let session = bsk::daemon::sessions::Session {
+    default_tab_id: None,
+    window_mode: None,
         interaction: None,
 
         id: bsk::daemon::sessions::SessionId("zzzz".into()),
@@ -1244,6 +1263,8 @@ async fn session_stop_self_heals_when_extension_reports_not_found() {
     // restart from the daemon's point of view).
     let state = handle.state();
     let session = bsk::daemon::sessions::Session {
+    default_tab_id: None,
+    window_mode: None,
         interaction: None,
 
         id: bsk::daemon::sessions::SessionId("yyyy".into()),
@@ -1345,6 +1366,8 @@ async fn reconnect_with_same_instance_id_purges_stale_sessions_but_keeps_new_bro
     let state = handle.state();
     // Pretend ext A registered a real session.
     let session = bsk::daemon::sessions::Session {
+    default_tab_id: None,
+    window_mode: None,
         interaction: None,
 
         id: bsk::daemon::sessions::SessionId("xxxx".into()),
@@ -1574,6 +1597,8 @@ fn interaction_updates_follow_the_owning_browser_in_both_directions() {
     let owner = BrowserId("owner".into());
     let id = SessionId("existing".into());
     registry.insert(Session {
+    default_tab_id: None,
+    window_mode: None,
         id: id.clone(),
         browser_id: owner.clone(),
         agent_window_id: Some(100),
@@ -1614,6 +1639,8 @@ async fn borrow_deadline_cancels_the_extension_and_preserves_a_committed_result(
         let state = handle.state();
         let session_id = SessionId("borrow-deadline".into());
         state.sessions.insert(Session {
+    default_tab_id: None,
+    window_mode: None,
             id: session_id.clone(),
             browser_id: bsk::daemon::browsers::BrowserId(TEST_EXT_ID.into()),
             agent_window_id: Some(100),
@@ -1685,6 +1712,8 @@ async fn borrow_reports_unknown_outcome_when_cancel_cleanup_never_finishes() {
     let state = handle.state();
     let sid = SessionId("borrow-unknown".into());
     state.sessions.insert(Session {
+    default_tab_id: None,
+    window_mode: None,
         id: sid.clone(),
         browser_id: bsk::daemon::browsers::BrowserId(TEST_EXT_ID.into()),
         agent_window_id: Some(100),
@@ -1855,6 +1884,8 @@ mod recoverable_starts {
             .unwrap();
         assert_eq!(conflicting.unwrap_err().code, ErrorCode::InvalidParams);
         let foreign = bsk::daemon::sessions::Session {
+    default_tab_id: None,
+    window_mode: None,
             id: bsk::daemon::sessions::SessionId("foreign".into()),
             browser_id: bsk::daemon::browsers::BrowserId(TEST_EXT_ID.into()),
             agent_window_id: Some(999),

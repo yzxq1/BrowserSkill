@@ -94,6 +94,7 @@ export class AgentWindowRouting {
   private live(task: SessionContext): boolean {
     return (
       !this.disposed &&
+      !task.existingWindow &&
       this.manager.get(task.sessionId) === task &&
       !this.manager.isWindowCloseExpected(task)
     );

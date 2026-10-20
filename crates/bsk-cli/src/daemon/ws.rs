@@ -815,11 +815,11 @@ mod session_user_interrupt_tests {
         );
 
         assert!(
-            state.session_interrupts.try_consume(&sid_a),
+            state.session_interrupts.is_pending(&sid_a),
             "session A must have a pending interrupt set"
         );
         assert!(
-            !state.session_interrupts.try_consume(&sid_b),
+            !state.session_interrupts.is_pending(&sid_b),
             "session B must not be marked"
         );
     }
@@ -867,7 +867,7 @@ mod session_user_interrupt_tests {
             "non-owning browser must not cancel another session's tools"
         );
         assert!(
-            !state.session_interrupts.try_consume(&sid),
+            !state.session_interrupts.is_pending(&sid),
             "interrupt marker must not be set by a non-owning browser"
         );
     }

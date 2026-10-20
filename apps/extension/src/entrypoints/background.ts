@@ -102,7 +102,7 @@ export default defineBackground(() => {
     shouldAutoAcceptDialog: async (tabId) => {
       const tab = await chrome.tabs.get(tabId);
       const session = sessions.findByWindowId(tab.windowId);
-      return session !== null && (!session.remote || isAgentControlledTab(session, tabId));
+      return session !== null && (!(session.remote || session.existingWindow) || isAgentControlledTab(session, tabId));
     },
   });
   const debug = new DebugManager(sessions, cdp, chrome.tabs, Date.now, new LocalDebugArchive());
@@ -144,7 +144,11 @@ export default defineBackground(() => {
       void chrome.action.setBadgeText({ text: video.isRecording() ? "REC" : "" });
     },
   });
-  attachVideoBridge(video, videoHost, (sessionId) => handleOverlayInterrupt(transport, sessionId));
+  attachVideoBridge(video, videoHost, (sessionId) => {
+    dispatcher.interruptSession(sessionId);
+    setControlMode(sessionId, "paused");
+    return handleOverlayInterrupt(transport, sessionId);
+  });
   chrome.webNavigation.onBeforeNavigate.addListener((details) => {
     if (details.frameId !== 0) return;
     if (cdpBlockedUrlReason(details.url))
@@ -552,13 +556,15 @@ export default defineBackground(() => {
     if (msg.kind === OVERLAY_MSG_INTERRUPT) {
       const req = msg as OverlayInterruptRequest;
       const ctx = sessions.get(req.sessionId);
-      if (ctx) setControlMode(req.sessionId, "interrupting");
-      void handleOverlayInterrupt(transport, req.sessionId).then((reply) => {
-        if (reply.ok && sessions.get(req.sessionId)) {
-          setControlMode(req.sessionId, "paused");
-        }
-        sendResponse(reply);
-      });
+      const senderTabId = sender.tab?.id;
+      if (!ctx || typeof senderTabId !== "number" || !isAgentControlledTab(ctx, senderTabId)) {
+        sendResponse({ ok: false });
+        return false;
+      }
+      // The browser stops immediately; daemon delivery is not a prerequisite.
+      dispatcher.interruptSession(req.sessionId);
+      setControlMode(req.sessionId, "paused");
+      void handleOverlayInterrupt(transport, req.sessionId).then(sendResponse);
       return true; // keep channel open
     }
     return false;

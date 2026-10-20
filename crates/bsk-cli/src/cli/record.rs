@@ -102,6 +102,7 @@ fn dispatch_start(args: RecordStartArgs, format: Format) -> Result<(), CliError>
     let session = start_session(
         info.sock_path.clone(),
         SessionStartOptions {
+    window_id: None,
             browser: args.browser,
             focused: Some(true),
             ..SessionStartOptions::default()
