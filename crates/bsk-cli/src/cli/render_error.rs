@@ -163,7 +163,7 @@ pub fn info_for(code: ErrorCode) -> RenderInfo {
         ErrorCode::UserAborted => RenderInfo {
             summary: "operation interrupted by user",
             hint: Some(
-                "the user requested an interrupt (e.g. via the agent window's stop button); rerun if this was unintended",
+                "respect the user interrupt; ask how to proceed, then explicitly run `bsk session resume SESSION_ID` only after the user requests continuation",
             ),
             exit_code: 2,
         },

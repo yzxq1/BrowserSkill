@@ -266,7 +266,13 @@ export async function handleTabList(
     if (typeof t.id !== "number") continue;
     const winId = typeof t.windowId === "number" ? t.windowId : -1;
     if (otherAgentWindowIds.has(winId)) continue;
-    const tabScope: "user" | "agent" = (ctx.existingWindow ? isAgentControlledTab(ctx, t.id) : winId === myAgentWindowId) ? "agent" : "user";
+    const tabScope: "user" | "agent" = (
+      ctx.existingWindow
+        ? isAgentControlledTab(ctx, t.id)
+        : winId === myAgentWindowId
+    )
+      ? "agent"
+      : "user";
     if (scope === "user" && tabScope !== "user") continue;
     if (scope === "agent" && tabScope !== "agent") continue;
     tabs.push({
@@ -376,6 +382,14 @@ function buildCreateProps(
   return createProps;
 }
 
+function releaseCreatedTabClaim(ctx: SessionContext, tabId: number): void {
+  ctx.agentCreatedTabs.delete(tabId);
+  if (ctx.existingWindow && ctx.defaultTabId === tabId) {
+    ctx.defaultTabId =
+      ctx.agentCreatedTabs.values().next().value ?? ctx.borrowedTabs.keys().next().value;
+  }
+}
+
 /**
  * Create a tab and handle post-creation abort cleanup.
  * On abort the opened tab is immediately removed so it doesn't leak.
@@ -416,9 +430,17 @@ async function createAndClaimTab(
   ctx.agentCreatedTabs.add(tab.id);
   if (ctx.existingWindow) ctx.defaultTabId ??= tab.id;
   if (aborted(deps.signal, "tab_create")) {
+    if (ctx.existingWindow) {
+      releaseCreatedTabClaim(ctx, tab.id);
+      return {
+        code: "cancelled",
+        message: `tab_create aborted; tab ${tab.id} was left open without task control`,
+        data: { resource_type: "tab", resource_id: tab.id, resource_state: "released" },
+      };
+    }
     try {
       await getTabsApi(deps).remove(tab.id);
-      ctx.agentCreatedTabs.delete(tab.id);
+      releaseCreatedTabClaim(ctx, tab.id);
     } catch (cleanupErr) {
       // Keep the claim when cleanup fails so session_stop can retry instead
       // of releasing an agent-owned tab to the user.
@@ -490,8 +512,9 @@ export async function handleTabCreate(
         cleanupErrors.push(`release: ${describeError(cleanupError)}`);
       }
       try {
-        await getTabsApi(deps).remove(tab.id);
-        ctx.agentCreatedTabs.delete(tab.id);
+        // Removing the last tab would implicitly remove a shared user window.
+        if (!ctx.existingWindow) await getTabsApi(deps).remove(tab.id);
+        releaseCreatedTabClaim(ctx, tab.id);
       } catch (cleanupError) {
         // Keep the claim only when closing fails, so session cleanup can retry.
         cleanupErrors.push(`close: ${describeError(cleanupError)}`);
@@ -507,6 +530,9 @@ export async function handleTabCreate(
       return {
         code: deps.signal?.aborted ? "cancelled" : "cdp_failed",
         message: describeError(error),
+        ...(ctx.existingWindow
+          ? { data: { resource_type: "tab", resource_id: tab.id, resource_state: "released" } }
+          : {}),
       };
     }
   }
@@ -630,7 +656,7 @@ export async function handleTabClose(
     }
     // Keep the tracking set accurate so session_stop won't try to close a
     // tab that's already gone (design §3.1).
-    ctx.agentCreatedTabs.delete(params.tab_id);
+    releaseCreatedTabClaim(ctx, params.tab_id);
     ctx.observedTabs?.delete(params.tab_id);
   } catch (err) {
     return {
@@ -749,7 +775,10 @@ async function validateBorrowTarget(
       `tab_borrow: tab ${tabId} is already controlled by session ${owner}`,
     );
   if (ctx.existingWindow && tab.windowId !== ctx.agentWindowId) {
-    return { code: "permission_denied", message: "Existing-window sessions may only borrow tabs in their own window" };
+    return {
+      code: "permission_denied",
+      message: "Existing-window sessions may only borrow tabs in their own window",
+    };
   }
   if (!ctx.existingWindow && tab.windowId === ctx.agentWindowId) {
     return {
@@ -990,10 +1019,11 @@ export async function handleTabBorrow(
       committed = true;
     } catch (err) {
       try {
-        if (!ctx.existingWindow) await tabsApi.move(params.tab_id, {
-          windowId: coreResult.originalWindowId,
-          index: coreResult.originalIndex,
-        });
+        if (!ctx.existingWindow)
+          await tabsApi.move(params.tab_id, {
+            windowId: coreResult.originalWindowId,
+            index: coreResult.originalIndex,
+          });
       } catch (rollbackError) {
         return rpcError(
           "protocol_error",
@@ -1210,11 +1240,18 @@ async function returnBorrowedTabCore(
   if (ctx.existingWindow) {
     const cancelled = aborted(deps.signal, "tab_return");
     if (cancelled) return cancelled;
-    const tab = await getTabsApi(deps).get(tabId).catch(() => undefined);
+    const tab = await getTabsApi(deps)
+      .get(tabId)
+      .catch(() => undefined);
     await releaseReturnedTabState(ctx, tabId, deps);
     ctx.refStore.invalidateTab(tabId);
     if (ctx.defaultTabId === tabId) ctx.defaultTabId = ctx.agentCreatedTabs.values().next().value;
-    return { tabId, toWindowId: tab?.windowId ?? entry.originalWindowId, toIndex: tab?.index ?? entry.originalIndex, fallback: false };
+    return {
+      tabId,
+      toWindowId: tab?.windowId ?? entry.originalWindowId,
+      toIndex: tab?.index ?? entry.originalIndex,
+      fallback: false,
+    };
   }
   const tabsApi = getTabsApi(deps);
   const windowsApi = getWindowsApi(deps);

@@ -238,14 +238,18 @@ export class ToolDispatcher {
     if ([...this.inflightSessions].some(([id, owner]) => id !== rpcId && owner === sessionId)) {
       return {
         code: "protocol_error",
-        message: "session still has an unfinished command; wait for cancellation cleanup before resuming",
+        message:
+          "session still has an unfinished command; wait for cancellation cleanup before resuming",
         data: { reason: "session_busy" },
       };
     }
     const epoch = this.pausedSessions.get(ctx);
     await this.releaseHoverLatch(sessionId);
     if (this.sessions.get(sessionId) !== ctx || this.pausedSessions.get(ctx) !== epoch) {
-      return { code: "user_aborted", message: "session interrupted again while resuming; still paused" };
+      return {
+        code: "user_aborted",
+        message: "session interrupted again while resuming; still paused",
+      };
     }
     this.pausedSessions.delete(ctx);
     this.onBrowserControlResumed?.(sessionId);
@@ -366,7 +370,8 @@ export class ToolDispatcher {
       if (sessionId && this.isSessionPaused(sessionId)) {
         const paused: RpcError = {
           code: "user_aborted",
-          message: "Session paused by user. Ask how to proceed, then explicitly run session resume; no action was replayed.",
+          message:
+            "Session paused by user. Ask how to proceed, then explicitly run session resume; no action was replayed.",
         };
         this.transport.send({ id: req.id, error: paused });
         return;
@@ -490,7 +495,8 @@ export class ToolDispatcher {
     if (preparationError) return preparationError;
     switch (req.method) {
       case "tool.session_resume": {
-        if (!sessionId) return { code: "invalid_params", message: "session.resume requires session_id" };
+        if (!sessionId)
+          return { code: "invalid_params", message: "session.resume requires session_id" };
         return this.resumeSession(sessionId, req.id);
       }
       case "tool.video":

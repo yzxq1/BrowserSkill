@@ -178,8 +178,8 @@ async fn respond_to_aborted_start(
             id: start.id,
             body: ResponseBody::Ok(
                 serde_json::to_value(SessionStartResult {
-    default_tab_id: None,
-    window_mode: None,
+                    default_tab_id: None,
+                    window_mode: None,
                     interaction: None,
                     agent_window_id: Some(agent_window_id),
                 })
@@ -216,8 +216,8 @@ async fn respond_to_aborted_stop(
             id: start.id,
             body: ResponseBody::Ok(
                 serde_json::to_value(SessionStartResult {
-    default_tab_id: None,
-    window_mode: None,
+                    default_tab_id: None,
+                    window_mode: None,
                     interaction: None,
                     agent_window_id: Some(4242),
                 })
@@ -349,7 +349,7 @@ async fn cli_incognito_start_refuses_an_old_daemon_before_dispatching_a_start() 
         start_session(
             path,
             SessionStartOptions {
-    window_id: None,
+                window_id: None,
                 incognito: true,
                 ..Default::default()
             },
@@ -410,8 +410,8 @@ async fn session_start_stop_round_trip_via_ipc() {
                             serde_json::from_value(req.params.clone().unwrap()).unwrap();
                         assert_eq!(params.focused, Some(false));
                         let result = SessionStartResult {
-    default_tab_id: None,
-    window_mode: None,
+                            default_tab_id: None,
+                            window_mode: None,
                             interaction: None,
                             agent_window_id: Some(4242),
                         };
@@ -757,8 +757,8 @@ async fn session_idle_timeout_stops_and_unregisters_session() {
     let state = handle.state();
     let session_id = bsk::daemon::sessions::SessionId("idle".into());
     state.sessions.insert(bsk::daemon::sessions::Session {
-    default_tab_id: None,
-    window_mode: None,
+        default_tab_id: None,
+        window_mode: None,
         interaction: None,
 
         id: session_id.clone(),
@@ -850,8 +850,8 @@ async fn session_start_waits_for_late_extension_handshake() {
                 continue;
             }
             let result = SessionStartResult {
-    default_tab_id: None,
-    window_mode: None,
+                default_tab_id: None,
+                window_mode: None,
                 interaction: None,
                 agent_window_id: Some(4242),
             };
@@ -992,8 +992,8 @@ async fn session_start_with_browser_instance_id_picks_target() {
                 && req.method == Method::ToolSessionStart
             {
                 let result = SessionStartResult {
-    default_tab_id: None,
-    window_mode: None,
+                    default_tab_id: None,
+                    window_mode: None,
                     interaction: None,
                     agent_window_id: Some(123),
                 };
@@ -1099,8 +1099,8 @@ async fn session_start_label_match_picks_target() {
                 && req.method == Method::ToolSessionStart
             {
                 let result = SessionStartResult {
-    default_tab_id: None,
-    window_mode: None,
+                    default_tab_id: None,
+                    window_mode: None,
                     interaction: None,
                     agent_window_id: Some(456),
                 };
@@ -1189,8 +1189,8 @@ async fn session_window_closed_event_purges_session() {
     let _ = handshake_as_ext(&mut ws).await;
     let state = handle.state();
     let session = bsk::daemon::sessions::Session {
-    default_tab_id: None,
-    window_mode: None,
+        default_tab_id: None,
+        window_mode: None,
         interaction: None,
 
         id: bsk::daemon::sessions::SessionId("zzzz".into()),
@@ -1230,8 +1230,8 @@ async fn browser_disconnect_purges_sessions() {
     // post-start state without bothering with the round-trip.
     let state = handle.state();
     let session = bsk::daemon::sessions::Session {
-    default_tab_id: None,
-    window_mode: None,
+        default_tab_id: None,
+        window_mode: None,
         interaction: None,
 
         id: bsk::daemon::sessions::SessionId("zzzz".into()),
@@ -1263,8 +1263,8 @@ async fn session_stop_self_heals_when_extension_reports_not_found() {
     // restart from the daemon's point of view).
     let state = handle.state();
     let session = bsk::daemon::sessions::Session {
-    default_tab_id: None,
-    window_mode: None,
+        default_tab_id: None,
+        window_mode: None,
         interaction: None,
 
         id: bsk::daemon::sessions::SessionId("yyyy".into()),
@@ -1366,8 +1366,8 @@ async fn reconnect_with_same_instance_id_purges_stale_sessions_but_keeps_new_bro
     let state = handle.state();
     // Pretend ext A registered a real session.
     let session = bsk::daemon::sessions::Session {
-    default_tab_id: None,
-    window_mode: None,
+        default_tab_id: None,
+        window_mode: None,
         interaction: None,
 
         id: bsk::daemon::sessions::SessionId("xxxx".into()),
@@ -1597,8 +1597,8 @@ fn interaction_updates_follow_the_owning_browser_in_both_directions() {
     let owner = BrowserId("owner".into());
     let id = SessionId("existing".into());
     registry.insert(Session {
-    default_tab_id: None,
-    window_mode: None,
+        default_tab_id: None,
+        window_mode: None,
         id: id.clone(),
         browser_id: owner.clone(),
         agent_window_id: Some(100),
@@ -1639,8 +1639,8 @@ async fn borrow_deadline_cancels_the_extension_and_preserves_a_committed_result(
         let state = handle.state();
         let session_id = SessionId("borrow-deadline".into());
         state.sessions.insert(Session {
-    default_tab_id: None,
-    window_mode: None,
+            default_tab_id: None,
+            window_mode: None,
             id: session_id.clone(),
             browser_id: bsk::daemon::browsers::BrowserId(TEST_EXT_ID.into()),
             agent_window_id: Some(100),
@@ -1712,8 +1712,8 @@ async fn borrow_reports_unknown_outcome_when_cancel_cleanup_never_finishes() {
     let state = handle.state();
     let sid = SessionId("borrow-unknown".into());
     state.sessions.insert(Session {
-    default_tab_id: None,
-    window_mode: None,
+        default_tab_id: None,
+        window_mode: None,
         id: sid.clone(),
         browser_id: bsk::daemon::browsers::BrowserId(TEST_EXT_ID.into()),
         agent_window_id: Some(100),
@@ -1884,8 +1884,8 @@ mod recoverable_starts {
             .unwrap();
         assert_eq!(conflicting.unwrap_err().code, ErrorCode::InvalidParams);
         let foreign = bsk::daemon::sessions::Session {
-    default_tab_id: None,
-    window_mode: None,
+            default_tab_id: None,
+            window_mode: None,
             id: bsk::daemon::sessions::SessionId("foreign".into()),
             browser_id: bsk::daemon::browsers::BrowserId(TEST_EXT_ID.into()),
             agent_window_id: Some(999),
@@ -2261,4 +2261,113 @@ mod recoverable_starts {
         assert_eq!(status["state"], "closed");
         daemon.shutdown().await;
     }
+}
+
+#[tokio::test]
+async fn existing_window_start_is_version_gated_and_round_trips_its_own_tab() {
+    use bsk::cli::error::CliError;
+    use bsk::cli::session::{SessionStartOptions, start_session};
+    for protocol in ["1.4", bsk::daemon::state::PROTOCOL_VERSION] {
+        for window_id in [-1, 42] {
+            let (handle, sock) = spawn_daemon().await;
+            let mut ws = connect_ext(handle.ws_addr()).await;
+            handshake_with_protocol(&mut ws, protocol).await;
+            let start = tokio::task::spawn_blocking(move || {
+                start_session(
+                    sock,
+                    SessionStartOptions {
+                        window_id: Some(window_id),
+                        ..Default::default()
+                    },
+                )
+            });
+            if protocol == "1.4" {
+                let error = start.await.unwrap().unwrap_err();
+                assert!(matches!(
+                    error,
+                    CliError::Rpc {
+                        code: ErrorCode::Unsupported,
+                        ..
+                    }
+                ));
+                assert!(
+                    tokio::time::timeout(
+                        Duration::from_millis(100),
+                        next_extension_request(&mut ws)
+                    )
+                    .await
+                    .is_err()
+                );
+                assert_eq!(handle.state().sessions.len(), 0);
+            } else {
+                let request = next_extension_request(&mut ws).await;
+                assert_eq!(request.method, Method::ToolSessionStart);
+                let params: SessionStartParams =
+                    serde_json::from_value(request.params.unwrap()).unwrap();
+                assert_eq!(params.window_id, Some(window_id));
+                send_extension_response(&mut ws,ResponseFrame {id:request.id,body:ResponseBody::Ok(serde_json::json!({"agent_window_id":42,"default_tab_id":7,"window_mode":"existing"}))}).await;
+                let result = start.await.unwrap().unwrap();
+                assert_eq!(result.agent_window_id, Some(42));
+                assert_eq!(result.default_tab_id, Some(7));
+                assert_eq!(result.window_mode.as_deref(), Some("existing"));
+            }
+            drop(ws);
+            handle.shutdown().await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn existing_window_start_refuses_an_old_daemon_without_start_side_effects() {
+    use bsk::cli::error::CliError;
+    use bsk::cli::session::{SessionStartOptions, start_session};
+    use bsk::daemon::ipc::{self, DaemonStatus};
+    use std::sync::Mutex;
+    let sock = tempfile_path("bsk-existing-old-daemon");
+    let listener = ipc::bind(&sock).await.unwrap();
+    let system = ipc::system_handler(DaemonStatus {
+        started_at: std::time::Instant::now(),
+        ws_port: 0,
+        sock_path: sock.clone(),
+        daemon_version: "0.3.3",
+        protocol_version: "1.4",
+    });
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&calls);
+    let handler: ipc::RpcHandler = Arc::new(move |id, method, params| {
+        recorded.lock().unwrap().push(method.clone());
+        system(id, method, params)
+    });
+    let server = tokio::spawn(ipc::serve(
+        listener,
+        handler,
+        || {},
+        || {},
+        || {},
+        std::future::pending::<()>(),
+    ));
+    let path = sock.clone();
+    let error = tokio::task::spawn_blocking(move || {
+        start_session(
+            path,
+            SessionStartOptions {
+                window_id: Some(-1),
+                ..Default::default()
+            },
+        )
+    })
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        CliError::Rpc {
+            code: ErrorCode::Unsupported,
+            ..
+        }
+    ));
+    assert_eq!(*calls.lock().unwrap(), vec![Method::SystemStatus]);
+    server.abort();
+    let _ = server.await;
+    let _ = std::fs::remove_file(sock);
 }

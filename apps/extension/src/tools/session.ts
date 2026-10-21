@@ -141,10 +141,20 @@ export async function handleSessionStart(
   if (params.incognito !== undefined && typeof params.incognito !== "boolean") {
     return { code: "invalid_params", message: "incognito must be a boolean" };
   }
-  if (params.window_id !== undefined && (
-    !Number.isSafeInteger(params.window_id) || (params.window_id !== -1 && params.window_id <= 0) ||
-    params.incognito !== undefined || params.width !== undefined || params.height !== undefined || params.focused === true
-  )) return { code: "invalid_params", message: "window_id must be -1 (current) or a positive integer; it conflicts with incognito, width, height and focused:true" };
+  if (
+    params.window_id !== undefined &&
+    (!Number.isSafeInteger(params.window_id) ||
+      (params.window_id !== -1 && params.window_id <= 0) ||
+      params.incognito !== undefined ||
+      params.width !== undefined ||
+      params.height !== undefined ||
+      params.focused === true)
+  )
+    return {
+      code: "invalid_params",
+      message:
+        "window_id must be -1 (current) or a positive integer; it conflicts with incognito, width, height and focused:true",
+    };
   const sizeOrErr = validateWindowSize(params.width, params.height);
   if (isRpcError(sizeOrErr)) return sizeOrErr;
   try {
@@ -174,7 +184,24 @@ export async function handleSessionStart(
       err !== null &&
       (err as { name?: string }).name === "AbortError"
     ) {
-      return { code: "cancelled", message: "session_start aborted" };
+      const released = err as { releasedTabId?: number; releasedWindowId?: number };
+      return {
+        code: "cancelled",
+        message:
+          released.releasedTabId === undefined
+            ? "session_start aborted"
+            : `session_start aborted; tab ${released.releasedTabId} was left open without task control`,
+        ...(released.releasedTabId === undefined
+          ? {}
+          : {
+              data: {
+                resource_type: "tab",
+                resource_id: released.releasedTabId,
+                window_id: released.releasedWindowId,
+                resource_state: "released",
+              },
+            }),
+      };
     }
     // chrome.windows.create / SessionManager failures are not CDP
     // failures (§4.5 reserves cdp_failed for raw CDP errors). Surface
@@ -328,10 +355,15 @@ async function stopSession(
   }
 
   if (ctx.existingWindow) {
-    const controlled = new Set([...ctx.agentCreatedTabs, ...ctx.borrowedTabs.keys(), ...(ctx.observedTabs ?? [])]);
+    const controlled = new Set([
+      ...ctx.agentCreatedTabs,
+      ...ctx.borrowedTabs.keys(),
+      ...(ctx.observedTabs ?? []),
+    ]);
     await manager.stop(params.session_id, { dropOnly: true });
     const reset = deps.tabManagement?.agentOverlayReset ?? chromeAgentOverlayResetApi;
-    for (const tabId of controlled) void reset.resetAgentOverlays(tabId, ctx.sessionId).catch(() => {});
+    for (const tabId of controlled)
+      void reset.resetAgentOverlays(tabId, ctx.sessionId).catch(() => {});
     ctx.agentCreatedTabs.clear();
     ctx.borrowedTabs.clear();
     ctx.observedTabs?.clear();

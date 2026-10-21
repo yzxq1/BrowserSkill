@@ -43,6 +43,14 @@
       ],
       "format": "uint32",
       "minimum": 0.0
+    },
+    "window_id": {
+      "description": "Append a background tab to this normal window; -1 selects the current user window (reject ambiguous candidates). Other IDs must be positive. Never fall back.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
     }
   }
 }

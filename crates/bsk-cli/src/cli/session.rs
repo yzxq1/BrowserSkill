@@ -95,8 +95,13 @@ pub struct SessionStartArgs {
 }
 
 fn existing_window(value: &str) -> Result<i64, String> {
-    if value == "current" { return Ok(-1); }
-    value.parse::<i64>().ok().filter(|id| *id > 0)
+    if value == "current" {
+        return Ok(-1);
+    }
+    value
+        .parse::<i64>()
+        .ok()
+        .filter(|id| *id > 0)
         .ok_or_else(|| "--window expects current or a positive window ID".into())
 }
 
@@ -212,11 +217,22 @@ pub fn dispatch(cmd: SessionCmd, format: Format) -> Result<(), CliError> {
             run_start(info.sock_path, args, format)
         }
         SessionSub::Resume { session_id } => {
-            crate::cli::protocol::require_daemon_support(&info.sock_path, "session resume",
-                bsk_protocol::tools::SESSION_CONTROL_PROTOCOL, bsk_protocol::tools::supports_session_control)?;
-            let reply: serde_json::Value = call(info.sock_path, Method::SessionResume,
-                Some(serde_json::json!({"session_id":session_id})), Duration::from_secs(40))?;
-            println!("{}", serde_json::to_string_pretty(&reply).context("encode resume result")?);
+            crate::cli::protocol::require_daemon_support(
+                &info.sock_path,
+                "session resume",
+                bsk_protocol::tools::SESSION_CONTROL_PROTOCOL,
+                bsk_protocol::tools::supports_session_control,
+            )?;
+            let reply: serde_json::Value = call(
+                info.sock_path,
+                Method::SessionResume,
+                Some(serde_json::json!({"session_id":session_id})),
+                Duration::from_secs(40),
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&reply).context("encode resume result")?
+            );
             Ok(())
         }
         SessionSub::Stop(args) => run_stop(info.sock_path, args, format),
@@ -328,11 +344,22 @@ pub struct SessionStartOptions {
 /// Start a session and open the Agent Window. Used by `session start` and `record start`.
 pub fn start_session(sock: PathBuf, opts: SessionStartOptions) -> Result<StartReply, CliError> {
     if let Some(id) = opts.window_id {
-        if (id != -1 && id <= 0) || opts.incognito || opts.width.is_some() || opts.height.is_some() || opts.focused == Some(true) {
-            return Err(CliError::Local(anyhow::anyhow!("--window requires current or a positive ID and conflicts with incognito, size and focus")));
+        if (id != -1 && id <= 0)
+            || opts.incognito
+            || opts.width.is_some()
+            || opts.height.is_some()
+            || opts.focused == Some(true)
+        {
+            return Err(CliError::Local(anyhow::anyhow!(
+                "--window requires current or a positive ID and conflicts with incognito, size and focus"
+            )));
         }
-        crate::cli::protocol::require_daemon_support(&sock, "session start --window",
-            bsk_protocol::tools::SESSION_CONTROL_PROTOCOL, bsk_protocol::tools::supports_session_control)?;
+        crate::cli::protocol::require_daemon_support(
+            &sock,
+            "session start --window",
+            bsk_protocol::tools::SESSION_CONTROL_PROTOCOL,
+            bsk_protocol::tools::supports_session_control,
+        )?;
     }
     if opts.incognito {
         crate::cli::protocol::require_daemon_support(
@@ -951,5 +978,69 @@ mod i3_tests {
         let stderr = render_human_to_string(&cli, Some(&extras));
         assert!(!stderr.contains("connected browsers:"));
         assert!(stderr.contains("details: requested browser is not connected"));
+    }
+}
+
+#[cfg(test)]
+mod existing_window_cli_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn window_selector_accepts_current_and_positive_id() {
+        for (value, expected) in [("current", -1), ("42", 42)] {
+            let cli =
+                crate::cli::Cli::try_parse_from(["bsk", "session", "start", "--window", value])
+                    .unwrap();
+            let crate::cli::Command::Session(SessionCmd {
+                sub: SessionSub::Start(args),
+            }) = cli.command
+            else {
+                panic!("expected start")
+            };
+            assert_eq!(args.window_id, Some(expected));
+        }
+    }
+    #[test]
+    fn window_selector_rejects_invalid_ids() {
+        for value in ["0", "-1", "-2", "some-window", "9223372036854775808"] {
+            assert!(
+                crate::cli::Cli::try_parse_from(["bsk", "session", "start", "--window", value])
+                    .is_err()
+            );
+        }
+    }
+    #[test]
+    fn existing_window_conflicts_with_window_mutation_options() {
+        for extra in [
+            vec!["--incognito"],
+            vec!["--focus"],
+            vec!["--width", "800"],
+            vec!["--height", "600"],
+        ] {
+            let mut argv = vec!["bsk", "session", "start", "--window", "current"];
+            argv.extend(extra);
+            assert!(crate::cli::Cli::try_parse_from(argv).is_err());
+        }
+        assert!(
+            crate::cli::Cli::try_parse_from([
+                "bsk",
+                "session",
+                "start",
+                "--window",
+                "current",
+                "--no-focus"
+            ])
+            .is_ok()
+        );
+    }
+    #[test]
+    fn resume_requires_explicit_session_id() {
+        assert!(crate::cli::Cli::try_parse_from(["bsk", "session", "resume"]).is_err());
+        let cli =
+            crate::cli::Cli::try_parse_from(["bsk", "session", "resume", "original"]).unwrap();
+        assert!(
+            matches!(cli.command, crate::cli::Command::Session(SessionCmd { sub: SessionSub::Resume { session_id } }) if session_id == "original")
+        );
     }
 }

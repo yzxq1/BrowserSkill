@@ -506,8 +506,8 @@ mod ownership_tests {
 
     fn session(id: &str, window: i64) -> Session {
         Session {
-    default_tab_id: None,
-    window_mode: None,
+            default_tab_id: None,
+            window_mode: None,
             id: SessionId(id.into()),
             browser_id: BrowserId("browser".into()),
             agent_window_id: Some(window),
