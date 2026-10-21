@@ -14,6 +14,7 @@ import { DebugPanel } from "./debug-panel";
 import { POPUP_FEATURES, type PopupView } from "./features";
 import { InteractionSettings } from "./interaction-settings";
 import { LongScreenshot } from "./long-screenshot";
+import { ResumeTasks } from "./resume-tasks";
 import { SettingInfo } from "./setting-info";
 import { Switch } from "./switch";
 import { type PopupStatusState, useConnectionState } from "./use-connection-state";
@@ -276,6 +277,7 @@ export function App() {
 
           <InteractionSettings />
 
+          <ResumeTasks enabled={connectionLive} />
           <CurrentTasks enabled={connectionLive} />
 
           {snapshot.lastError && (

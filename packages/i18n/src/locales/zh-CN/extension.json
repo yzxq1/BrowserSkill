@@ -2,7 +2,7 @@
   "popup": {
     "interactionCompatibilityWarning": "已连接到旧版 Daemon（协议 v{{cliProtocol}}）。部分自动化设置需要更新 CLI 和 Daemon 才能完整生效。",
     "brandCategory": "Browser Automation",
-    "brandName": "BrowserSkill",
+    "brandName": "BrowserSkill-2",
     "stateLabel": {
       "disconnected": "未连接",
       "connecting": "连接中…",
@@ -665,5 +665,19 @@
     "agentHint": "开始任务前告诉 Agent 需要录制，它会自动启停录制。你可以在这里查看状态、预览和保存视频。",
     "manual": "手动录制正在运行的任务",
     "copyFailed": "复制提示词失败，请重试。"
+  },
+  "resumeOverlay": {
+    "paused": "任务已暂停",
+    "resume": "继续执行",
+    "resuming": "正在恢复…",
+    "tasks": "已暂停的任务",
+    "task": "任务 {{sessionId}}",
+    "hint": "恢复控制，不重放已取消操作。若 AI 对话已停止，请回到对话说“继续”。",
+    "error_busy": "上一操作仍在清理，请稍后再点“继续执行”。",
+    "error_disconnected": "连接已断开或确认超时，任务保持暂停。",
+    "error_unsupported": "请更新到配套的本机 bsk/daemon，再使用“继续执行”。",
+    "error_interrupted": "恢复时再次收到中断，任务保持暂停。",
+    "error_stale": "原会话已失效，没有重新创建会话。",
+    "error_failed": "未能确认恢复成功，任务保持暂停。"
   }
 }

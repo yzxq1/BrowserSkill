@@ -23,6 +23,8 @@ export type ErrorCode =
 
 /** Stable `RpcError.data.reason` values for CLI hint selection. */
 export type RpcErrorReason =
+  | "session_busy"
+  | "session_paused"
   | "extract_params_invalid"
   | "extract_target_stale"
   | "extract_target_ambiguous"

@@ -1,5 +1,7 @@
 # BrowserSkill
 
+> **BrowserSkill-2（蓝色图标）**：本分支新增页面和扩展弹窗的“继续执行”按钮，配套 daemon 协议 1.6。[使用、安装与验证说明](docs/extension-click-resume.zh-CN.md)。
+
 > **定制分支**：支持现有窗口后台追加任务标签页与 Interrupt 后显式恢复。[使用与构建说明](docs/fork-existing-window.zh-CN.md)。
 
 <p align="center">
