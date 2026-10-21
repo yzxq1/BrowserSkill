@@ -2,6 +2,24 @@
 
 这是 `yzxq1/BrowserSkill` 的 `feat/existing-window-resume` 分支。保留上游 MIT 许可证；默认独立 Agent Window 行为不变。
 
+## 哪些功能必须改扩展
+
+以下结论来自上游源码（`Tencent/BrowserSkill` 提交 `e8777ab`）：
+
+| 需求 | 是否必须改扩展 | 依据 |
+|---|---|---|
+| 在正在使用的窗口末尾追加标签页，不新建窗口 | **必须改扩展** | 官方扩展新建标签页时固定使用 Agent Window（`apps/extension/src/tools/tabs.ts` 中 `windowId: ctx.agentWindowId`）；借用页面也会先移进 Agent Window（`moveTabForBorrow`）。CLI 加参数改变不了扩展的这一行为。 |
+| Interrupt 后持续暂停，明确恢复后继续原会话 | **不必须，只改本机 bsk/daemon 基本能实现** | 官方扩展点击 Interrupt 后只向 daemon 发送 `session.user_interrupt` 通知；“只拦一次”的逻辑在 daemon（`crates/bsk-cli/src/daemon/ipc.rs` 的 `try_consume`）。 |
+
+只改 bsk/daemon 实现持续暂停的方式：daemon 把一次性标记改为持续暂停，暂停期间的操作在 daemon 就被拒绝，不会发给扩展，页面遮罩保持暂停；恢复时由 daemon 清除暂停，下一次操作时官方扩展会自动把遮罩切回控制状态。
+
+只改 bsk 的局限：
+
+- Interrupt 通知没送到 daemon（断连等）时不会暂停。
+- 浏览器端没有独立暂停保护，完全依赖 daemon 拦截。
+
+这项“只改 bsk、保留官方扩展”的实现在单独分支 `feat/interrupt-resume-official-extension`。**本分支**的 `session resume` 要求扩展协议 1.5，配官方扩展时会被拒绝，必须与本分支构建的扩展配套使用。
+
 ## 不新建窗口，后台追加任务页
 
 ```sh
