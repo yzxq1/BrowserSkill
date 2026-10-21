@@ -1,6 +1,21 @@
-# BrowserSkill
+# BrowserSkill-2 (Customized Fork)
 
-> **定制分支**：支持现有窗口后台追加任务标签页与 Interrupt 后显式恢复。[使用与构建说明](docs/fork-existing-window.zh-CN.md)。
+> 🚀 **Key Custom Features in this branch (`feat/existing-window-resume`)**:
+>
+> 1. **Existing Window Background Append Mode**: Run `bsk2 session start --window current` to append task tabs silently to the end of your active Chrome window **without popup or focus theft**. User windows are **never closed** on session stop.
+> 2. **Persistent Interrupt & Explicit Resume**: Clicking Interrupt pauses the session, cancels in-flight actions, and preserves DOM state. Resume cleanly via the on-page / popup **"Continue" button** or `bsk2 session resume <SESSION_ID>`.
+> 3. **Native Extension Strategy Controls**:
+>    - **Window Strategy**: Choose between "Append to Current Window" or "Dedicated Agent Window".
+>    - **Tab Cleanup**: Toggle auto-closing task tabs on completion.
+> 4. **Complete Isolation**:
+>    - Standalone binary: `bsk2` (coexists with official `bsk`).
+>    - Dedicated WebSocket port: `52801`.
+>    - Dedicated home directory: `~/.bsk2`.
+>    - Blue rocket icon for distinct visual identification.
+>
+> 📖 See details: [Existing Window & Resume Guide](docs/fork-existing-window.zh-CN.md) · [Click-to-Resume Guide](docs/extension-click-resume.zh-CN.md)
+
+---
 
 <p align="center">
   <img src="docs/assets/browserskill-readme-banner.png" alt="BrowserSkill — connect your AI agent to your browser" />

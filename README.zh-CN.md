@@ -1,6 +1,21 @@
-# BrowserSkill
+# BrowserSkill-2 (定制增强版)
 
-> **此分支为本地定制版**：新增 `session start --window current`，在现有窗口末尾后台追加任务页；新增 `session resume`，明确恢复被 Interrupt 暂停的原会话。默认独立窗口模式保留。见[使用与构建说明](docs/fork-existing-window.zh-CN.md)。
+> 🚀 **本分支 (`feat/existing-window-resume`) 二改核心功能特性**：
+>
+> 1. **现有窗口后台追加模式**：支持 `bsk2 session start --window current`。在用户当前活跃的普通浏览器窗口末尾静默追加标签页，**不弹新窗口、不抢焦点**；任务退出时安全释放控制权，**绝不关闭用户自身窗口**。
+> 2. **Interrupt 持久打断与显式恢复**：用户点击页面上的 Interrupt 打断后，会话进入持久 `paused` 状态并取消在途请求，DOM 状态保留不销毁；支持在页面角落或弹窗直接点击**「继续执行」**，或终端执行 `bsk2 session resume <SESSION_ID>` 进行 CAS 安全代次校验恢复。
+> 3. **扩展弹窗原生策略控制**：
+>    - **Agent 运行策略单选**：自由切换「当前窗口追加模式」或「独立 Agent 窗口模式（所有任务收纳在同一专属窗口）」。
+>    - **任务完成自动关页开关**：可自由选择 Agent 任务完成/停止后是否自动清理自身标签页。
+> 4. **完全独立与多重隔离**：
+>    - 专属命令行指令：`bsk2`（与官方 `bsk` 彻底共存）。
+>    - 专属 WebSocket 端口：`52801`（避免与官方默认 `52800` 冲突）。
+>    - 专属用户主目录：`~/.bsk2`。
+>    - 蓝色小火箭图标：视觉与官方橙色版本清晰区分。
+>
+> 📖 详细文档参考：[现有窗口与恢复设计说明](docs/fork-existing-window.zh-CN.md) · [点击恢复与界面设计说明](docs/extension-click-resume.zh-CN.md)
+
+---
 
 <p align="center">
   <img src="docs/assets/browserskill-readme-banner.png" alt="BrowserSkill — 将 AI Agent 连接到你的浏览器" />
