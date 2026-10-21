@@ -177,6 +177,13 @@
           "type": "integer",
           "format": "int64"
         },
+        "default_tab_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        },
         "interaction": {
           "anyOf": [
             {
@@ -187,8 +194,21 @@
             }
           ]
         },
+        "paused": {
+          "description": "Runtime-only pause; not persisted across daemon or browser restarts.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "session_id": {
           "type": "string"
+        },
+        "window_mode": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },

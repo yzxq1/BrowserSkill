@@ -10,6 +10,13 @@
       ],
       "format": "int64"
     },
+    "default_tab_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int64"
+    },
     "interaction": {
       "anyOf": [
         {
@@ -18,6 +25,12 @@
         {
           "type": "null"
         }
+      ]
+    },
+    "window_mode": {
+      "type": [
+        "string",
+        "null"
       ]
     }
   },

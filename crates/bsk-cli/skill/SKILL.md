@@ -8,8 +8,9 @@ description: |
 
 # browser-skill
 
-Use `bsk` in an **Agent Window** with the user's existing logins. User tabs
-require explicit borrowing. This skill does not install the extension or handle
+Use `bsk` in explicitly task-controlled tabs with the user's existing logins.
+By default these live in an **Agent Window**. This fork also supports an
+explicitly requested existing-window mode. User tabs require explicit borrowing. This skill does not install the extension or handle
 advice-only tasks. Never extract credentials, cookies, tokens, or other secrets.
 
 ## Before acting
@@ -52,6 +53,15 @@ applies to element names and labels you pass back to `click`, `fill` or `select`
 
 These tools run in the user's real, logged-in profile, so anything you are
 induced to do is done with their sessions.
+
+## 定制分支：现有窗口与中断恢复（协议 1.5）
+
+- 用户要求不新建窗口时，使用 `bsk session start --browser <id> --window current --json`，或明确的 `--window <WINDOW_ID>`。无法确定目标窗口时停止并报告，不静默回退新窗口、其他 Profile 或其他任务会话。
+- `--window` 不能与隐身、尺寸或 `--focus` 混用。保存返回的 `session_id` 和 `default_tab_id`；未指定 `--tab-id` 时操作任务默认页，不跟随用户当前活动页。
+- 共享窗口不授权其所有标签页。已有页面仍需借用确认；同窗口 borrow/return 原地接管和释放，不搬页。共享模式 stop 保留窗口及页面，仅释放控制权。
+- 用户点击 Interrupt 后持续暂停。不要自动重试、重开页面或重新创建 session 来绕过暂停。先尊重停止；用户明确说继续后，检查 `bsk session list --json`，执行 `bsk session resume <id>`，成功后重新 observe 并获取新 refs。
+- 恢复失败或 busy 时不重放旧动作；等待旧操作清理完成。再次中断优先于恢复。会话若已因断连、进程或 Service Worker 重启失效，不能声称同会话恢复；重新核实页面归属和授权。
+- 定制版与上游更新分开管理；使用 `BSK_AUTO_UPDATE=off`，不要自动更新覆盖定制二进制，也不要为此重启其他任务共享的 daemon。
 
 ## Task workflow
 

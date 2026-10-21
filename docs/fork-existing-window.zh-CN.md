@@ -82,7 +82,16 @@ pnpm ext:build
 
 现有窗口与显式恢复使用协议 **1.5**，须配套使用本分支 CLI、daemon 和扩展。旧端会被版本检查拒绝，不会忽略 `--window` 后退回新窗口。
 
-开发时先用完整路径调用构建产物，**不要直接覆盖正在运行的 `~/.local/bin/bsk` 或重启其他任务使用的 daemon**。替换正式使用版本前，应结束现有任务并确认扩展安装和连接实例。定制 daemon 应设置 `BSK_AUTO_UPDATE=off`，避免官方自动更新覆盖定制功能；手动 `bsk update` 也会安装上游版本，不用于更新本分支。
+开发时推荐使用仓库内的启动脚本：
+
+```sh
+./scripts/bsk-fork.sh session start --browser BROWSER_ID --window current --json
+./scripts/bsk-fork.sh session resume SESSION_ID --json
+```
+
+脚本调用本仓库的 `target/release/bsk`，关闭自动更新，并拒绝会覆盖定制版的 `update` 命令。它不会自动替换、停止或重启已经运行的 daemon；如连到旧 daemon，会因协议不支持而拒绝新功能。先等待现有任务结束，再单独安排切换。
+
+开发时也可用完整路径调用构建产物，**不要直接覆盖正在运行的 `~/.local/bin/bsk` 或重启其他任务使用的 daemon**。替换正式使用版本前，应结束现有任务并确认扩展安装和连接实例。定制 daemon 应设置 `BSK_AUTO_UPDATE=off`，避免官方自动更新覆盖定制功能；手动 `bsk update` 也会安装上游版本，不用于更新本分支。
 
 ## 回归检查重点
 
@@ -91,3 +100,21 @@ pnpm ext:build
 3. 借用确认、原地归还、启动取消、发送失败、断连及停止均不误删用户窗口。
 4. 连续动作不会消费掉暂停；旧操作清理、恢复失败和再次中断不会被自动重试绕过。
 5. 默认独立窗口模式保持回归兼容。
+
+## 本轮验证（2026-10-21）
+
+- 扩展 TypeScript 类型检查、`pnpm ext:build`：通过。
+- 扩展全量单元测试：2705 通过、245 跳过、0 失败。跳过项包括需显式配置的浏览器集成测试，不表示这些测试已执行。
+- Rust 全工作区：869 通过、1 忽略、0 失败；`cargo build --release --locked` 通过。
+- `pnpm lint`：通过，含 DSH plugin 类型检查及 538 项测试。第三方依赖缺失 source map 的警告不影响退出码。
+- 新增真实 Chrome for Testing 集成测试已单独执行，并连续三次通过：验证追加末尾、不切换用户活动页、未授权页面读取拒绝、原地借用/归还、连续暂停、恢复同页面、停止保留全部页面。测试使用独立临时 Profile，不接触现有 Chrome 登录态。
+
+真实浏览器测试命令（Chrome for Testing 的实际路径由运行者指定）：
+
+```sh
+BSK_EXISTING_WINDOW_CHROME="/path/to/chrome-for-testing" \
+  pnpm --filter @browser-skill/extension exec vitest run \
+  src/session-manager/__tests__/existing-window.browser.test.ts
+```
+
+本地现有 `~/.local/bin/bsk`、运行中的 daemon 以及已安装 Chrome 扩展均未替换。正式使用新功能仍需切换到本分支 CLI/daemon，并加载同分支构建的扩展。`default_tab_id` 在启动响应和 daemon 会话元数据中记录启动时的任务页；浏览器内后续 borrow/select 可改变默认操作目标，应重新读取页面和标签归属，而非永久缓存旧 refs。

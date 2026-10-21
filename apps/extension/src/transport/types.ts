@@ -16,6 +16,7 @@ export type ErrorCode =
   | "cdp_failed"
   | "protocol_error"
   | "cancelled"
+  | "user_aborted"
   | "version_too_old"
   | "multiple_browsers_online"
   | "no_browser_connected";
@@ -1141,5 +1142,10 @@ export interface SessionStatusEntry extends SessionStartResult {
   /** Runtime only; not recovered across process restarts. */
   paused?: boolean;
 }
-export interface SessionResumeParams { session_id: string; }
-export interface SessionResumeResult { resumed: boolean; interrupt_epoch?: number; }
+export interface SessionResumeParams {
+  session_id: string;
+}
+export interface SessionResumeResult {
+  resumed: boolean;
+  interrupt_epoch?: number;
+}

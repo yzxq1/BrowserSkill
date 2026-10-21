@@ -11,7 +11,12 @@ export async function auditContext(
   const context = sessions.get(params.session_id);
   if (!context) return null;
   const ref = typeof params.ref === "string" ? context.refStore.resolveEntry(params.ref) : null;
-  const requestedTab = typeof params.tab_id === "number" ? params.tab_id : (context.existingWindow ? context.defaultTabId ?? null : null);
+  const requestedTab =
+    typeof params.tab_id === "number"
+      ? params.tab_id
+      : context.existingWindow
+        ? (context.defaultTabId ?? null)
+        : null;
   if (context.existingWindow && requestedTab === null) return null;
   const tab =
     requestedTab !== null

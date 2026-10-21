@@ -78,10 +78,19 @@ async fn handshake_as_ext(
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
 ) -> HandshakeResult {
+    handshake_as_ext_version(ws, bsk::daemon::state::PROTOCOL_VERSION).await
+}
+
+async fn handshake_as_ext_version(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    protocol: &str,
+) -> HandshakeResult {
     let params = HandshakeParams {
         client: "browser-skill-extension".into(),
         version: "0.1.0-dev.0".parse().unwrap(),
-        protocol_version: bsk::daemon::state::PROTOCOL_VERSION.into(),
+        protocol_version: protocol.into(),
         instance_id: TEST_EXT_ID.into(),
         browser: BrowserPeerInfo {
             name: "chrome".into(),
@@ -158,8 +167,8 @@ async fn session_user_interrupt_event_cancels_inflight_with_user_aborted() {
                 match req.method {
                     Method::ToolSessionStart => {
                         let result = SessionStartResult {
-    default_tab_id: None,
-    window_mode: None,
+                            default_tab_id: None,
+                            window_mode: None,
                             interaction: None,
                             agent_window_id: Some(1),
                         };
@@ -337,8 +346,8 @@ async fn assert_idle_interrupt_rejects(method: Method) {
             if let Frame::Request(req) = frame {
                 if req.method == Method::ToolSessionStart {
                     let result = SessionStartResult {
-    default_tab_id: None,
-    window_mode: None,
+                        default_tab_id: None,
+                        window_mode: None,
                         interaction: None,
                         agent_window_id: Some(1),
                     };
@@ -468,8 +477,8 @@ async fn read_only_tool_passes_through_without_consuming_interrupt_marker() {
                 let body = match req.method {
                     Method::ToolSessionStart => ResponseBody::Ok(
                         serde_json::to_value(SessionStartResult {
-    default_tab_id: None,
-    window_mode: None,
+                            default_tab_id: None,
+                            window_mode: None,
                             interaction: None,
                             agent_window_id: Some(1),
                         })
@@ -629,8 +638,8 @@ async fn user_interrupt_marker_survives_long_delay_before_next_tool() {
                 let body = match req.method {
                     Method::ToolSessionStart => ResponseBody::Ok(
                         serde_json::to_value(SessionStartResult {
-    default_tab_id: None,
-    window_mode: None,
+                            default_tab_id: None,
+                            window_mode: None,
                             interaction: None,
                             agent_window_id: Some(1),
                         })
@@ -715,4 +724,230 @@ async fn user_interrupt_marker_survives_long_delay_before_next_tool() {
 
     responder.abort();
     handle.shutdown().await;
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ResumeCase {
+    Success,
+    Rejected,
+    Malformed,
+    InterruptedAgain,
+    OldExtension,
+}
+
+async fn assert_explicit_resume(case: ResumeCase) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    handshake_as_ext_version(
+        &mut ws,
+        if matches!(case, ResumeCase::OldExtension) {
+            "1.4"
+        } else {
+            bsk::daemon::state::PROTOCOL_VERSION
+        },
+    )
+    .await;
+    let (sink, mut stream) = ws.split();
+    let sink = Arc::new(tokio::sync::Mutex::new(sink));
+    let writer = Arc::clone(&sink);
+    let forwarded = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&forwarded);
+    let resume_count = Arc::new(AtomicUsize::new(0));
+    let resumes = Arc::clone(&resume_count);
+    let responder = tokio::spawn(async move {
+        while let Some(Ok(Message::Text(text))) = stream.next().await {
+            let Ok(Frame::Request(req)) = serde_json::from_str::<Frame>(&text) else {
+                continue;
+            };
+            let body = match req.method {
+                Method::ToolSessionStart => ResponseBody::Ok(
+                    json!({"agent_window_id":42,"default_tab_id":7,"window_mode":"dedicated"}),
+                ),
+                Method::ToolSessionResume => {
+                    resumes.fetch_add(1, Ordering::SeqCst);
+                    match case {
+                        ResumeCase::Rejected => ResponseBody::Err(RpcError {
+                            code: ErrorCode::ProtocolError,
+                            message: "cleanup still busy".into(),
+                            data: None,
+                        }),
+                        ResumeCase::OldExtension => ResponseBody::Err(RpcError {
+                            code: ErrorCode::Unsupported,
+                            message: "resume unavailable".into(),
+                            data: None,
+                        }),
+                        ResumeCase::Malformed => ResponseBody::Ok(json!({"resumed":false})),
+                        ResumeCase::InterruptedAgain => {
+                            let sid = req.params.as_ref().unwrap()["session_id"].clone();
+                            let event = EventFrame {
+                                event: EventKind::SessionUserInterrupt,
+                                payload: json!({"session_id":sid}),
+                            };
+                            writer
+                                .lock()
+                                .await
+                                .send(Message::Text(serde_json::to_string(&event).unwrap()))
+                                .await
+                                .unwrap();
+                            ResponseBody::Ok(json!({"resumed":true,"interrupt_epoch":1}))
+                        }
+                        ResumeCase::Success => {
+                            ResponseBody::Ok(json!({"resumed":true,"interrupt_epoch":1}))
+                        }
+                    }
+                }
+                Method::ToolClick => {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    ResponseBody::Ok(json!({"clicked":true}))
+                }
+                Method::ToolConsole => ResponseBody::Ok(json!({"entries":[]})),
+                _ => continue,
+            };
+            let reply = ResponseFrame { id: req.id, body };
+            writer
+                .lock()
+                .await
+                .send(Message::Text(serde_json::to_string(&reply).unwrap()))
+                .await
+                .unwrap();
+        }
+    });
+    let mut ipc = IpcClient::connect(&sock).await.unwrap();
+    let start = ipc
+        .call::<_, serde_json::Value>(
+            "resume-start",
+            Method::SessionStart,
+            Some(json!({})),
+            Duration::from_secs(3),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let sid = start["session_id"].as_str().unwrap().to_owned();
+    let event = EventFrame {
+        event: EventKind::SessionUserInterrupt,
+        payload: json!({"session_id":sid}),
+    };
+    sink.lock()
+        .await
+        .send(Message::Text(serde_json::to_string(&event).unwrap()))
+        .await
+        .unwrap();
+    wait_for_session_interrupt_pending(&handle.state(), &sid).await;
+    for index in 0..2 {
+        let outcome = ipc
+            .call::<_, serde_json::Value>(
+                &format!("blocked-{index}"),
+                Method::ToolClick,
+                Some(json!({"session_id":sid,"selector":"#target"})),
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome.unwrap_err().code, ErrorCode::UserAborted);
+    }
+    assert_eq!(forwarded.load(Ordering::SeqCst), 0);
+    let list = ipc
+        .call::<_, serde_json::Value>(
+            "paused-list",
+            Method::SessionList,
+            Some(json!({})),
+            Duration::from_secs(3),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(list["sessions"][0]["paused"], true);
+    let outcome = ipc
+        .call::<_, serde_json::Value>(
+            "explicit-resume",
+            Method::SessionResume,
+            Some(json!({"session_id":sid})),
+            Duration::from_secs(3),
+        )
+        .await
+        .unwrap();
+    if matches!(case, ResumeCase::Success) {
+        assert_eq!(outcome.unwrap()["resumed"], true);
+        assert!(
+            !handle
+                .state()
+                .session_interrupts
+                .is_pending(&bsk::daemon::sessions::SessionId(sid.clone()))
+        );
+        assert!(
+            ipc.call::<_, serde_json::Value>(
+                "click-after-resume",
+                Method::ToolClick,
+                Some(json!({"session_id":sid,"selector":"#target"})),
+                Duration::from_secs(3)
+            )
+            .await
+            .unwrap()
+            .is_ok()
+        );
+        assert_eq!(forwarded.load(Ordering::SeqCst), 1);
+        let again = ipc
+            .call::<_, serde_json::Value>(
+                "idempotent-resume",
+                Method::SessionResume,
+                Some(json!({"session_id":sid})),
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(again["resumed"], true);
+    } else {
+        assert!(outcome.is_err(), "{case:?} must not unlock the daemon");
+        assert!(
+            handle
+                .state()
+                .session_interrupts
+                .is_pending(&bsk::daemon::sessions::SessionId(sid.clone()))
+        );
+        let blocked = ipc
+            .call::<_, serde_json::Value>(
+                "still-blocked",
+                Method::ToolClick,
+                Some(json!({"session_id":sid})),
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(blocked.code, ErrorCode::UserAborted);
+        assert_eq!(forwarded.load(Ordering::SeqCst), 0);
+    }
+    if matches!(case, ResumeCase::OldExtension) {
+        assert_eq!(
+            resume_count.load(Ordering::SeqCst),
+            0,
+            "old extensions must be rejected before dispatch"
+        );
+    }
+    responder.abort();
+    handle.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn explicit_resume_unlocks_same_session_without_replaying_input() {
+    assert_explicit_resume(ResumeCase::Success).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn failed_extension_resume_keeps_daemon_paused() {
+    assert_explicit_resume(ResumeCase::Rejected).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn malformed_resume_confirmation_keeps_daemon_paused() {
+    assert_explicit_resume(ResumeCase::Malformed).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn newer_interrupt_wins_resume_generation_race() {
+    assert_explicit_resume(ResumeCase::InterruptedAgain).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn unsupported_resume_keeps_daemon_paused() {
+    assert_explicit_resume(ResumeCase::OldExtension).await;
 }

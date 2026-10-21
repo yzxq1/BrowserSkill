@@ -15,12 +15,16 @@ pub const INCOGNITO_SESSION_PROTOCOL: &str = "1.4";
 pub const SESSION_CONTROL_PROTOCOL: &str = "1.5";
 pub fn supports_session_control(protocol: &str) -> bool {
     crate::system::compare_protocol(protocol, "2.0") == Some(std::cmp::Ordering::Less)
-        && matches!(crate::system::compare_protocol(protocol, SESSION_CONTROL_PROTOCOL),
-            Some(std::cmp::Ordering::Equal | std::cmp::Ordering::Greater))
+        && matches!(
+            crate::system::compare_protocol(protocol, SESSION_CONTROL_PROTOCOL),
+            Some(std::cmp::Ordering::Equal | std::cmp::Ordering::Greater)
+        )
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct SessionResumeParams { pub session_id: String }
+pub struct SessionResumeParams {
+    pub session_id: String,
+}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionResumeResult {
     pub resumed: bool,
@@ -231,5 +235,29 @@ mod tests {
         let encoded = serde_json::to_value(result).unwrap();
         assert_eq!(encoded["returned_tab_ids"], json!([7, 8]));
         assert_eq!(encoded["return_failures"][0]["code"], "cdp_failed");
+    }
+}
+
+#[cfg(test)]
+mod session_control_tests {
+    use super::*;
+    #[test]
+    fn new_control_features_require_protocol_1_5_with_same_major() {
+        for version in ["1.0", "1.3", "1.4", "2.0", "invalid"] {
+            assert!(!supports_session_control(version), "{version}");
+        }
+        for version in ["1.5", "1.6"] {
+            assert!(supports_session_control(version), "{version}");
+        }
+    }
+    #[test]
+    fn legacy_start_fields_remain_optional() {
+        let params: SessionStartParams =
+            serde_json::from_value(serde_json::json!({"session_id":"original"})).unwrap();
+        assert_eq!(params.window_id, None);
+        let result: SessionStartResult =
+            serde_json::from_value(serde_json::json!({"agent_window_id":42})).unwrap();
+        assert_eq!(result.default_tab_id, None);
+        assert_eq!(result.window_mode, None);
     }
 }

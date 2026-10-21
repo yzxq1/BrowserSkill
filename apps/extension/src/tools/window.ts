@@ -53,7 +53,11 @@ export async function handleWindowResize(
   const ctxOrErr = lookupSession(manager, params, "window_resize");
   if (isRpcError(ctxOrErr)) return ctxOrErr;
   const ctx = ctxOrErr;
-  if (ctx.existingWindow) return { code: "permission_denied", message: "Existing user windows cannot be resized by a task" };
+  if (ctx.existingWindow)
+    return {
+      code: "permission_denied",
+      message: "Existing user windows cannot be resized by a task",
+    };
 
   const sizeOrErr = validateWindowSize(params.width, params.height);
   if (isRpcError(sizeOrErr)) return sizeOrErr;

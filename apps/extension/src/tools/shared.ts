@@ -198,7 +198,11 @@ export async function resolveTargetTab(
   api: ChromeTabsApi,
 ): Promise<ResolvedTargetTab | RpcError> {
   const target = await resolveVisibleTargetTab(manager, ctx, tabId, api);
-  if (!isRpcError(target) && (ctx.remote || ctx.existingWindow) && !isAgentControlledTab(ctx, target.tabId)) {
+  if (
+    !isRpcError(target) &&
+    (ctx.remote || ctx.existingWindow) &&
+    !isAgentControlledTab(ctx, target.tabId)
+  ) {
     return {
       code: "permission_denied",
       message: "Authorize this tab with tab_borrow before reading or operating it",
@@ -387,7 +391,11 @@ export async function resolveCdpAccessibleTargetTab(
 
   const tabs = await api.query({ windowId: ctx.agentWindowId });
   for (const tab of tabs) {
-    if ((ctx.remote || ctx.existingWindow) && (tab.id === undefined || !isAgentControlledTab(ctx, tab.id))) continue;
+    if (
+      (ctx.remote || ctx.existingWindow) &&
+      (tab.id === undefined || !isAgentControlledTab(ctx, tab.id))
+    )
+      continue;
     if (tab.id !== undefined && isPendingTabRouting(ctx, tab.id)) continue;
     const candidate = resolvedTargetFromChromeTab(tab, ctx.agentWindowId);
     if (!candidate) continue;

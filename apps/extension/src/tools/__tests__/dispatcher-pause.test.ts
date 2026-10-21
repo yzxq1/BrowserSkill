@@ -30,7 +30,9 @@ async function fixture() {
     return id;
   };
   const reply = async (id: string) => {
-    await vi.waitFor(() => expect(sent.some((frame) => "id" in frame && frame.id === id)).toBe(true));
+    await vi.waitFor(() =>
+      expect(sent.some((frame) => "id" in frame && frame.id === id)).toBe(true),
+    );
     return sent.find((frame) => "id" in frame && frame.id === id) as {
       error?: RpcError;
       result?: unknown;
@@ -45,12 +47,21 @@ describe("persistent local interruption", () => {
   it("blocks repeated inputs, hover observation, evaluation and unknown tools until explicit resume", async () => {
     const f = await fixture();
     expect(f.dispatcher.interruptSession("test")).toBe(true);
-    for (const method of ["tool.click", "tool.click", "tool.observe", "tool.evaluate", "tool.screenshot_full_page", "tool.new_mutator"]) {
+    for (const method of [
+      "tool.click",
+      "tool.click",
+      "tool.observe",
+      "tool.evaluate",
+      "tool.screenshot_full_page",
+      "tool.new_mutator",
+    ]) {
       expect((await f.reply(f.deliver(method))).error?.code).toBe("user_aborted");
       expect(f.dispatcher.isSessionPaused("test")).toBe(true);
     }
     expect(f.resumed).not.toHaveBeenCalled();
-    expect((await f.reply(f.deliver("tool.session_resume"))).result).toMatchObject({ resumed: true });
+    expect((await f.reply(f.deliver("tool.session_resume"))).result).toMatchObject({
+      resumed: true,
+    });
     expect(f.dispatcher.isSessionPaused("test")).toBe(false);
     expect(f.sessions.get("test")).toBe(f.ctx);
     expect(f.ctx.agentWindowId).toBe(42);
@@ -60,7 +71,9 @@ describe("persistent local interruption", () => {
   });
 
   it("still allows tab listing and does not consume the pause", async () => {
-    vi.stubGlobal("chrome", { tabs: { query: async () => [{ id: 7, windowId: 42, active: true }] } });
+    vi.stubGlobal("chrome", {
+      tabs: { query: async () => [{ id: 7, windowId: 42, active: true }] },
+    });
     const f = await fixture();
     f.dispatcher.interruptSession("test");
     expect((await f.reply(f.deliver("tool.tab_list"))).error).toBeUndefined();
@@ -79,17 +92,23 @@ describe("persistent local interruption", () => {
     vi.spyOn(internal, "invoke").mockImplementation((req, signal) => {
       if (req.method !== "tool.navigate") return invoke(req, signal);
       entered();
-      return new Promise((resolve) => { complete = resolve; });
+      return new Promise((resolve) => {
+        complete = resolve;
+      });
     });
     const oldId = f.deliver("tool.navigate");
     await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce());
     f.dispatcher.interruptSession("test");
     expect([...f.dispatcher.inflightAbortControllers.values()][0].signal.aborted).toBe(true);
-    expect((await f.reply(f.deliver("tool.session_resume"))).error?.data).toMatchObject({ reason: "session_busy" });
+    expect((await f.reply(f.deliver("tool.session_resume"))).error?.data).toMatchObject({
+      reason: "session_busy",
+    });
     expect(f.dispatcher.isSessionPaused("test")).toBe(true);
     complete({ finished: true });
     await f.reply(oldId);
-    expect((await f.reply(f.deliver("tool.session_resume"))).result).toMatchObject({ resumed: true });
+    expect((await f.reply(f.deliver("tool.session_resume"))).result).toMatchObject({
+      resumed: true,
+    });
     f.dispatcher.stop();
   });
 
@@ -97,7 +116,9 @@ describe("persistent local interruption", () => {
     const f = await fixture();
     f.dispatcher.interruptSession("test");
     let complete!: () => void;
-    const cleanup = new Promise<void>((resolve) => { complete = resolve; });
+    const cleanup = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
     const internal = f.dispatcher as unknown as { releaseHoverLatch(id?: string): Promise<void> };
     const release = vi.spyOn(internal, "releaseHoverLatch").mockReturnValue(cleanup);
     const resumeId = f.deliver("tool.session_resume");

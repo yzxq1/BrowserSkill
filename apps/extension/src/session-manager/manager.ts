@@ -1,6 +1,6 @@
 import { AGENT_WINDOW_HOME, type AgentWindowApi, chromeAgentWindowApi } from "./agent-window";
-import { RefStore } from "./ref-store";
 import { chromeExistingWindowApi, type ExistingWindowApi } from "./existing-window";
+import { RefStore } from "./ref-store";
 
 export interface SessionContext {
   existingWindow?: boolean;
@@ -175,6 +175,10 @@ export class SessionManager {
       ctx.agentCreatedTabs.delete(tabId);
       ctx.observedTabs?.delete(tabId);
       if (!isWindowClosing) ctx.borrowedTabs.delete(tabId);
+      if (ctx.existingWindow && ctx.defaultTabId === tabId) {
+        ctx.defaultTabId =
+          ctx.agentCreatedTabs.values().next().value ?? ctx.borrowedTabs.keys().next().value;
+      }
     }
   }
 
@@ -273,10 +277,11 @@ export class SessionManager {
       this.startingSessions.add(sessionId);
       let resolved: number;
       try {
-        resolved = await this.existingWindow.resolveCurrentWindow(new Set([
-          ...this.windowIndex.keys(), ...this.windowReservations.keys(),
-        ]));
-        if (!Number.isSafeInteger(resolved) || resolved <= 0) throw new Error("No current user window available");
+        resolved = await this.existingWindow.resolveCurrentWindow(
+          new Set([...this.windowIndex.keys(), ...this.windowReservations.keys()]),
+        );
+        if (!Number.isSafeInteger(resolved) || resolved <= 0)
+          throw new Error("No current user window available");
       } finally {
         this.startingSessions.delete(sessionId);
       }
@@ -284,7 +289,13 @@ export class SessionManager {
       return this.start(sessionId, { ...opts, windowId: resolved });
     }
     if (opts.windowId !== undefined) {
-      if (!Number.isSafeInteger(opts.windowId) || opts.windowId <= 0 || opts.incognito !== undefined || opts.size !== undefined || opts.focused === true) {
+      if (
+        !Number.isSafeInteger(opts.windowId) ||
+        opts.windowId <= 0 ||
+        opts.incognito !== undefined ||
+        opts.size !== undefined ||
+        opts.focused === true
+      ) {
         throw new Error("Invalid existing window options");
       }
       if (this.windowIndex.has(opts.windowId) || this.windowReservations.has(opts.windowId)) {
@@ -304,13 +315,25 @@ export class SessionManager {
         }
         throwIfSessionStartAborted(opts.signal);
         const tabId = await this.existingWindow.createTaskTab(opts.windowId);
-        // Cancellation releases authority only; never delete a user window or its pages.
-        throwIfSessionStartAborted(opts.signal);
+        // Cancellation releases authority only; report any retained page rather
+        // than removing the user's possibly last tab and implicitly closing it.
+        if (opts.signal?.aborted) {
+          throw Object.assign(sessionStartAbortError(), {
+            releasedTabId: tabId,
+            releasedWindowId: opts.windowId,
+          });
+        }
         const ctx: SessionContext = {
-          existingWindow: true, defaultTabId: tabId, incognito: false,
+          existingWindow: true,
+          defaultTabId: tabId,
+          incognito: false,
           ...(this.remote() ? { remote: true } : {}),
-          sessionId, agentWindowId: opts.windowId, refStore: new RefStore(),
-          borrowedTabs: new Map(), agentCreatedTabs: new Set([tabId]), createdAtMs: this.now(),
+          sessionId,
+          agentWindowId: opts.windowId,
+          refStore: new RefStore(),
+          borrowedTabs: new Map(),
+          agentCreatedTabs: new Set([tabId]),
+          createdAtMs: this.now(),
         };
         this.sessions.set(sessionId, ctx);
         this.windowIndex.set(opts.windowId, sessionId);

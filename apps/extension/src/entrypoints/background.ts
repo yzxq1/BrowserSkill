@@ -97,12 +97,16 @@ export default defineBackground(() => {
     isTabBusy: (tabId) => sessions.list().some((session) => isAgentControlledTab(session, tabId)),
   });
   attachAuditBridge(controller, transport);
-  const cdp = new ChromiumCdp(undefined, {
+  const cdp: ChromiumCdp = new ChromiumCdp(undefined, {
     onDocumentChanged: (tabId) => sessions.invalidateTabRefs(tabId),
-    shouldAutoAcceptDialog: async (tabId) => {
+    shouldAutoAcceptDialog: async (tabId): Promise<boolean> => {
       const tab = await chrome.tabs.get(tabId);
       const session = sessions.findByWindowId(tab.windowId);
-      return session !== null && (!(session.remote || session.existingWindow) || isAgentControlledTab(session, tabId));
+      return (
+        session !== null &&
+        !dispatcher.isSessionPaused(session.sessionId) &&
+        (!(session.remote || session.existingWindow) || isAgentControlledTab(session, tabId))
+      );
     },
   });
   const debug = new DebugManager(sessions, cdp, chrome.tabs, Date.now, new LocalDebugArchive());
@@ -391,7 +395,7 @@ export default defineBackground(() => {
     }
   });
   void interactionPreferences.readyOrFallback();
-  const dispatcher = new ToolDispatcher({
+  const dispatcher: ToolDispatcher = new ToolDispatcher({
     debug,
     video,
     interactionPreferences,
@@ -540,7 +544,13 @@ export default defineBackground(() => {
     if (msg.kind === OVERLAY_MSG_WHO_AM_I) {
       const windowId = sender.tab?.windowId;
       const ctx = typeof windowId === "number" ? sessions.findByWindowId(windowId) : null;
-      sendResponse({ sessionId: ctx?.sessionId ?? null });
+      const tabId = sender.tab?.id;
+      sendResponse({
+        sessionId:
+          ctx && typeof tabId === "number" && isAgentControlledTab(ctx, tabId)
+            ? ctx.sessionId
+            : null,
+      });
       return false;
     }
 

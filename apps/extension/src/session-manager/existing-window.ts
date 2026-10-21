@@ -9,7 +9,10 @@ export const chromeExistingWindowApi: ExistingWindowApi = {
   get: (windowId) => chrome.windows.get(windowId),
   async resolveCurrentWindow(excludedWindowIds) {
     const eligible = (win: chrome.windows.Window) =>
-      typeof win.id === "number" && win.type === "normal" && !win.incognito && !excludedWindowIds.has(win.id);
+      typeof win.id === "number" &&
+      win.type === "normal" &&
+      !win.incognito &&
+      !excludedWindowIds.has(win.id);
     const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
     const focused = windows.find((win) => win.focused && eligible(win));
     if (focused?.id !== undefined) return focused.id;
@@ -18,7 +21,7 @@ export const chromeExistingWindowApi: ExistingWindowApi = {
     throw new Error("No current normal user window is available; specify a window_id explicitly");
   },
   async createTaskTab(windowId) {
-    const tab = await chrome.tabs.create({ windowId, url: "about:blank", active: false, index: -1 });
+    const tab = await chrome.tabs.create({ windowId, url: "about:blank", active: false });
     if (typeof tab.id !== "number") throw new Error("chrome.tabs.create returned no task tab id");
     return tab.id;
   },
