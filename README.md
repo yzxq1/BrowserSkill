@@ -1,5 +1,7 @@
 # BrowserSkill
 
+> **官方扩展兼容分支**：只修改本机 bsk/daemon，实现 Interrupt 持续暂停与 `session resume`。无需替换 Chrome 官方扩展；不实现现有窗口追加。见[说明与使用方法](docs/official-extension-resume.zh-CN.md)。
+
 <p align="center">
   <img src="docs/assets/browserskill-readme-banner.png" alt="BrowserSkill — connect your AI agent to your browser" />
 </p>

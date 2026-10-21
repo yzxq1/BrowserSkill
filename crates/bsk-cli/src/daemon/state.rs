@@ -46,13 +46,10 @@ pub struct DaemonState {
     /// translated into a WS-side cancel frame addressed to the
     /// matching browser (M10.2).
     pub tool_inflight: Arc<ToolInflightRegistry>,
-    /// Per-session "pending interrupt" signal. The WS event handler
-    /// `mark`s the session when the user clicks the agent-window
-    /// mask's stop button; the IPC tool-dispatch handler
-    /// `try_consume`s on the way in so the next browser-input-dispatching
-    /// tool call is rejected with `UserAborted`. Independent of
-    /// `SessionRegistry` because the signal is a transient runtime
-    /// control state.
+    /// Per-session persistent pause set when the user clicks the
+    /// agent-window Interrupt button. Every browser-input tool call is
+    /// rejected with `UserAborted` until an explicit `session.resume`
+    /// compare-and-clears the current interrupt generation.
     pub session_interrupts: Arc<SessionInterruptRegistry>,
     /// Operation-scoped local file staging. The extension only sees paths
     /// minted here; agent-facing RPCs use opaque transfer ids.

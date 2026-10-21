@@ -81,6 +81,31 @@ pub struct SessionStartResult {
     pub agent_window_id: Option<i64>,
 }
 
+/// Official extension protocols verified for daemon-only pause/resume.
+/// A newer extension may implement its own persistent pause and require a
+/// browser-side resume RPC. Never claim to resume that unknown state locally.
+pub fn supports_daemon_only_resume(protocol: &str) -> bool {
+    matches!(
+        crate::system::compare_protocol(protocol, "1.3"),
+        Some(std::cmp::Ordering::Equal | std::cmp::Ordering::Greater)
+    ) && crate::system::compare_protocol(protocol, "1.5") == Some(std::cmp::Ordering::Less)
+}
+
+/// `session.resume`: clear a user-Interrupt pause on a live session.
+/// Daemon-only; no extension support is required.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SessionResumeParams {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SessionResumeResult {
+    pub session_id: String,
+    pub resumed: bool,
+    /// False when the session was not paused (idempotent resume).
+    pub was_paused: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SessionStopParams {
     pub session_id: String,
@@ -206,5 +231,39 @@ mod tests {
         let encoded = serde_json::to_value(result).unwrap();
         assert_eq!(encoded["returned_tab_ids"], json!([7, 8]));
         assert_eq!(encoded["return_failures"][0]["code"], "cdp_failed");
+    }
+}
+
+#[cfg(test)]
+mod daemon_resume_tests {
+    use super::*;
+    #[test]
+    fn resume_params_and_result_round_trip() {
+        let params: SessionResumeParams =
+            serde_json::from_value(serde_json::json!({"session_id":"original"})).unwrap();
+        assert_eq!(params.session_id, "original");
+        for was_paused in [true, false] {
+            let result = SessionResumeResult {
+                session_id: "original".into(),
+                resumed: true,
+                was_paused,
+            };
+            assert_eq!(
+                serde_json::from_value::<SessionResumeResult>(
+                    serde_json::to_value(&result).unwrap()
+                )
+                .unwrap(),
+                result
+            );
+        }
+    }
+    #[test]
+    fn unverified_or_independently_pausing_extensions_are_not_claimed_resumed() {
+        for version in ["1.3", "1.4"] {
+            assert!(supports_daemon_only_resume(version));
+        }
+        for version in ["1.0", "1.2", "1.5", "2.0", "invalid"] {
+            assert!(!supports_daemon_only_resume(version));
+        }
     }
 }

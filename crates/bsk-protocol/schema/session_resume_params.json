@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SessionResumeParams",
+  "description": "`session.resume`: clear a user-Interrupt pause on a live session. Daemon-only; no extension support is required.",
+  "type": "object",
+  "required": [
+    "session_id"
+  ],
+  "properties": {
+    "session_id": {
+      "type": "string"
+    }
+  }
+}

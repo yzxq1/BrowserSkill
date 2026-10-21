@@ -187,6 +187,13 @@
             }
           ]
         },
+        "paused": {
+          "description": "Paused by a user Interrupt until an explicit `session.resume`. Runtime-only: not persisted across daemon restarts.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "session_id": {
           "type": "string"
         }

@@ -691,6 +691,10 @@ fn handle_session_user_interrupt(
         );
         return;
     }
+    // Publish the pause before cancellation, so a concurrent newly registered
+    // tool is either cancelled here or rejected by the persistent pause gate.
+    state.session_interrupts.mark(&sid);
+    state.sessions.touch(&sid);
     let snapshots = state.tool_inflight.cancel_session(&sid);
     info!(session = %sid, count = snapshots.len(), "user-interrupt: cancelled inflight tools");
 
@@ -709,7 +713,6 @@ fn handle_session_user_interrupt(
     }
 
     state.audit.marker(&sid.0, "user_interrupt");
-    state.session_interrupts.mark(&sid);
 }
 
 #[cfg(test)]
@@ -815,11 +818,11 @@ mod session_user_interrupt_tests {
         );
 
         assert!(
-            state.session_interrupts.try_consume(&sid_a),
+            state.session_interrupts.is_pending(&sid_a),
             "session A must have a pending interrupt set"
         );
         assert!(
-            !state.session_interrupts.try_consume(&sid_b),
+            !state.session_interrupts.is_pending(&sid_b),
             "session B must not be marked"
         );
     }
@@ -867,7 +870,7 @@ mod session_user_interrupt_tests {
             "non-owning browser must not cancel another session's tools"
         );
         assert!(
-            !state.session_interrupts.try_consume(&sid),
+            !state.session_interrupts.is_pending(&sid),
             "interrupt marker must not be set by a non-owning browser"
         );
     }

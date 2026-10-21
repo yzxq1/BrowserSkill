@@ -175,6 +175,8 @@ impl DispatchError {
 #[derive(Debug, Default)]
 struct QueueState {
     busy: bool,
+    /// A cancelled operation never confirmed its cleanup. Do not resume it.
+    cleanup_uncertain: bool,
     active: Option<DebugActivity>,
 }
 
@@ -298,6 +300,33 @@ impl ToolQueueRegistry {
         };
         entry.accepting = true;
         true
+    }
+
+    /// Run a short, non-awaiting session-control operation while holding the
+    /// same idle slot used by dispatch. This neither sends an extension RPC nor
+    /// replays input, and cannot race a cancellation still draining in the worker.
+    pub fn with_idle<T>(
+        &self,
+        sid: &SessionId,
+        operation: impl FnOnce() -> T,
+    ) -> Result<T, DispatchError> {
+        let queues = self.queues.lock().expect("tool queue registry poisoned");
+        let entry = queues.get(sid).ok_or(DispatchError::SessionNotFound)?;
+        if !entry.accepting {
+            return Err(DispatchError::SessionStopping);
+        }
+        let state = entry.state.lock().expect("queue state poisoned");
+        if state.busy {
+            return Err(DispatchError::SessionBusy);
+        }
+        if state.cleanup_uncertain {
+            return Err(DispatchError::Rpc(RpcError {
+                code: ErrorCode::ProtocolError,
+                message: "Cancelled operation cleanup was not confirmed; inspect the page and end this session instead of resuming it".into(),
+                data: Some(serde_json::json!({"reason":"resume_cleanup_unconfirmed"})),
+            }));
+        }
+        Ok(operation())
     }
 
     /// Submit a job into `sid`'s queue and await the worker's response.
@@ -571,7 +600,27 @@ async fn run_worker(
     debug!(session = %sid, "tool queue worker started");
     while let Some(job) = rx.recv().await {
         let result = forward_one(&sid, &browsers, &sessions, &job).await;
-        clear_busy(&state);
+        {
+            let mut queue = state.lock().expect("queue state poisoned");
+            if job
+                .inflight
+                .as_ref()
+                .is_some_and(|entry| entry.is_cancelled())
+                && result.as_ref().is_err_and(|error| {
+                    !matches!(error.code, ErrorCode::Cancelled | ErrorCode::UserAborted)
+                        || error
+                            .data
+                            .as_ref()
+                            .and_then(|data| data.get("cleanup_state"))
+                            .and_then(Value::as_str)
+                            == Some("failed")
+                })
+            {
+                queue.cleanup_uncertain = true;
+            }
+            queue.busy = false;
+            queue.active = None;
+        }
         let _ = job.respond.send(result);
     }
     debug!(session = %sid, "tool queue worker exiting");

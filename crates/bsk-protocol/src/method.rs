@@ -42,6 +42,8 @@ pub enum Method {
     SessionRequest,
     #[serde(rename = "session.stop")]
     SessionStop,
+    #[serde(rename = "session.resume")]
+    SessionResume,
     #[serde(rename = "session.stop_all")]
     SessionStopAll,
     #[serde(rename = "session.list")]
@@ -240,6 +242,7 @@ impl Method {
             | Method::SessionStartTracked
             | Method::SessionRequest
             | Method::SessionStop
+            | Method::SessionResume
             | Method::SessionStopAll
             | Method::SessionList
             | Method::ToolSessionStart

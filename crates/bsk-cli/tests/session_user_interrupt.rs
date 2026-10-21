@@ -78,10 +78,19 @@ async fn handshake_as_ext(
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
     >,
 ) -> HandshakeResult {
+    handshake_as_ext_version(ws, "1.3").await
+}
+
+async fn handshake_as_ext_version(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    protocol: &str,
+) -> HandshakeResult {
     let params = HandshakeParams {
         client: "browser-skill-extension".into(),
         version: "0.1.0-dev.0".parse().unwrap(),
-        protocol_version: bsk::daemon::state::PROTOCOL_VERSION.into(),
+        protocol_version: protocol.into(),
         instance_id: TEST_EXT_ID.into(),
         browser: BrowserPeerInfo {
             name: "chrome".into(),
@@ -287,8 +296,8 @@ async fn session_user_interrupt_event_cancels_inflight_with_user_aborted() {
 /// The pending-interrupt marker must reject a *new* browser-input tool
 /// call that arrives AFTER the user clicked stop, even when no
 /// tool was inflight at click time. Under v2 single-use marker
-/// semantics, the marker survives indefinitely until consumed by
-/// an input-dispatching tool call — there is no time window. This is the
+/// semantics, the pause survives indefinitely until an explicit resume;
+/// rejected input never consumes it and there is no time window. This is the
 /// core motivating scenario: agents spend most of their time
 /// between tool calls (LLM thinking), and the stop button must
 /// catch a tool dispatched arbitrarily later.
@@ -548,8 +557,8 @@ async fn read_only_tool_passes_through_without_consuming_interrupt_marker() {
         console_outcome
     );
 
-    // Existing read-only snapshot must still succeed after console,
-    // proving console did not consume the marker.
+    // Official snapshot can reassert a hover, so while paused the daemon
+    // must reject it too. Console remains a safe read and cannot unpause.
     let snapshot_outcome = ipc
         .call::<_, serde_json::Value>(
             "snap-after-interrupt",
@@ -560,8 +569,10 @@ async fn read_only_tool_passes_through_without_consuming_interrupt_marker() {
         .await
         .unwrap();
     assert!(
-        snapshot_outcome.is_ok(),
-        "read-only tool.snapshot must pass through transparently (got {:?})",
+        snapshot_outcome
+            .as_ref()
+            .is_err_and(|error| error.code == ErrorCode::UserAborted),
+        "snapshot can dispatch hover input and must be rejected while paused (got {:?})",
         snapshot_outcome
     );
 
@@ -705,6 +716,434 @@ async fn user_interrupt_marker_survives_long_delay_before_next_tool() {
         "tool.click must NOT have reached the extension"
     );
 
+    responder.abort();
+    handle.shutdown().await;
+}
+
+/// Official-extension compatibility: neither a new handshake capability nor a
+/// tool.session_resume RPC is available. All resume work must stay local.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn official_extension_pause_resume_never_sends_a_resume_rpc() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    for protocol in ["1.3", "1.4"] {
+        let (handle, sock) = spawn_daemon().await;
+        let mut ws = connect_ext(handle.ws_addr()).await;
+        handshake_as_ext_version(&mut ws, protocol).await;
+        let (sink, mut stream) = ws.split();
+        let sink = Arc::new(tokio::sync::Mutex::new(sink));
+        let writer = Arc::clone(&sink);
+        let forwarded = Arc::new(AtomicUsize::new(0));
+        let clicks = Arc::new(AtomicUsize::new(0));
+        let total = Arc::clone(&forwarded);
+        let counted_clicks = Arc::clone(&clicks);
+        let responder = tokio::spawn(async move {
+            while let Some(Ok(Message::Text(text))) = stream.next().await {
+                let frame: Frame =
+                    serde_json::from_str(&text).expect("no new extension method may be sent");
+                let Frame::Request(req) = frame else {
+                    continue;
+                };
+                total.fetch_add(1, Ordering::SeqCst);
+                let result = match req.method {
+                    Method::ToolSessionStart => json!({"agent_window_id":42}),
+                    Method::ToolClick => {
+                        counted_clicks.fetch_add(1, Ordering::SeqCst);
+                        json!({"clicked":true})
+                    }
+                    Method::ToolConsole => json!({"entries":[]}),
+                    unexpected => panic!(
+                        "new/unsupported RPC was sent to the official extension: {unexpected:?}"
+                    ),
+                };
+                writer
+                    .lock()
+                    .await
+                    .send(Message::Text(
+                        serde_json::to_string(&ResponseFrame {
+                            id: req.id,
+                            body: ResponseBody::Ok(result),
+                        })
+                        .unwrap(),
+                    ))
+                    .await
+                    .unwrap();
+            }
+        });
+        let mut ipc = IpcClient::connect(&sock).await.unwrap();
+        let start = ipc
+            .call::<_, serde_json::Value>(
+                "start",
+                Method::SessionStart,
+                Some(json!({})),
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let sid = start["session_id"].as_str().unwrap().to_owned();
+        let event = EventFrame {
+            event: EventKind::SessionUserInterrupt,
+            payload: json!({"session_id":sid}),
+        };
+        sink.lock()
+            .await
+            .send(Message::Text(serde_json::to_string(&event).unwrap()))
+            .await
+            .unwrap();
+        wait_for_session_interrupt_pending(&handle.state(), &sid).await;
+        let calls_before_pause = forwarded.load(Ordering::SeqCst);
+        for (index, method) in [
+            Method::ToolClick,
+            Method::ToolClick,
+            Method::ToolSnapshot,
+            Method::ToolEvaluate,
+            Method::ToolObserve,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let error = ipc
+                .call::<_, serde_json::Value>(
+                    &format!("paused-{index}"),
+                    method,
+                    Some(json!({"session_id":sid})),
+                    Duration::from_secs(3),
+                )
+                .await
+                .unwrap()
+                .unwrap_err();
+            assert_eq!(error.code, ErrorCode::UserAborted);
+        }
+        assert_eq!(forwarded.load(Ordering::SeqCst), calls_before_pause);
+        assert_eq!(clicks.load(Ordering::SeqCst), 0);
+        let list = ipc
+            .call::<_, serde_json::Value>(
+                "list",
+                Method::SessionList,
+                Some(json!({})),
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(list["sessions"][0]["paused"], true);
+        assert!(
+            ipc.call::<_, serde_json::Value>(
+                "console",
+                Method::ToolConsole,
+                Some(json!({"session_id":sid})),
+                Duration::from_secs(3)
+            )
+            .await
+            .unwrap()
+            .is_ok()
+        );
+        let count_before_resume = forwarded.load(Ordering::SeqCst);
+        for was_paused in [true, false] {
+            let reply = ipc
+                .call::<_, serde_json::Value>(
+                    if was_paused { "resume" } else { "resume-again" },
+                    Method::SessionResume,
+                    Some(json!({"session_id":sid})),
+                    Duration::from_secs(3),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                reply,
+                json!({"session_id":sid,"resumed":true,"was_paused":was_paused})
+            );
+        }
+        assert_eq!(
+            forwarded.load(Ordering::SeqCst),
+            count_before_resume,
+            "resume must be daemon-only"
+        );
+        let sessions = handle.state().sessions.snapshot();
+        assert_eq!(sessions.len(), 1, "resume must not create a session");
+        assert_eq!(sessions[0].id.0, sid);
+        assert_eq!(sessions[0].agent_window_id, Some(42));
+        assert!(
+            ipc.call::<_, serde_json::Value>(
+                "click-after-resume",
+                Method::ToolClick,
+                Some(json!({"session_id":sid})),
+                Duration::from_secs(3)
+            )
+            .await
+            .unwrap()
+            .is_ok()
+        );
+        assert_eq!(
+            clicks.load(Ordering::SeqCst),
+            1,
+            "interrupted input must not replay"
+        );
+        sink.lock()
+            .await
+            .send(Message::Text(serde_json::to_string(&event).unwrap()))
+            .await
+            .unwrap();
+        wait_for_session_interrupt_pending(&handle.state(), &sid).await;
+        assert_eq!(
+            ipc.call::<_, serde_json::Value>(
+                "blocked-again",
+                Method::ToolClick,
+                Some(json!({"session_id":sid})),
+                Duration::from_secs(3)
+            )
+            .await
+            .unwrap()
+            .unwrap_err()
+            .code,
+            ErrorCode::UserAborted
+        );
+        responder.abort();
+        handle.shutdown().await;
+    }
+}
+
+async fn assert_resume_cleanup_barrier(confirm_cleanup: bool) {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    handshake_as_ext_version(&mut ws, "1.3").await;
+    let (sink, mut stream) = ws.split();
+    let sink = Arc::new(tokio::sync::Mutex::new(sink));
+    let writer = Arc::clone(&sink);
+    let cleanup = Arc::new(tokio::sync::Notify::new());
+    let allow_cleanup = Arc::clone(&cleanup);
+    let responder = tokio::spawn(async move {
+        let mut pending = None;
+        while let Some(Ok(Message::Text(text))) = stream.next().await {
+            let Ok(Frame::Request(req)) = serde_json::from_str::<Frame>(&text) else {
+                continue;
+            };
+            match req.method {
+                Method::ToolSessionStart => {
+                    writer
+                        .lock()
+                        .await
+                        .send(Message::Text(
+                            serde_json::to_string(&ResponseFrame {
+                                id: req.id,
+                                body: ResponseBody::Ok(json!({"agent_window_id":42})),
+                            })
+                            .unwrap(),
+                        ))
+                        .await
+                        .unwrap();
+                }
+                Method::ToolClick => {
+                    pending = Some(req.id);
+                }
+                Method::Cancel => {
+                    if let Some(id) = pending.take() {
+                        allow_cleanup.notified().await;
+                        let _ = writer
+                            .lock()
+                            .await
+                            .send(Message::Text(
+                                serde_json::to_string(&ResponseFrame {
+                                    id,
+                                    body: ResponseBody::Err(RpcError {
+                                        code: ErrorCode::Cancelled,
+                                        message: "cleanup finished".into(),
+                                        data: None,
+                                    }),
+                                })
+                                .unwrap(),
+                            ))
+                            .await;
+                    }
+                }
+                unexpected => panic!("resume unexpectedly called the browser: {unexpected:?}"),
+            }
+        }
+    });
+    let mut ipc = IpcClient::connect(&sock).await.unwrap();
+    let start = ipc
+        .call::<_, serde_json::Value>(
+            "start",
+            Method::SessionStart,
+            Some(json!({})),
+            Duration::from_secs(3),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let sid = start["session_id"].as_str().unwrap().to_owned();
+    let input_sid = sid.clone();
+    let input_sock = sock.clone();
+    let input = tokio::spawn(async move {
+        let mut client = IpcClient::connect(&input_sock).await.unwrap();
+        client
+            .call_with_id::<_, serde_json::Value>(
+                "slow-input".to_string(),
+                Method::ToolClick,
+                Some(json!({"session_id":input_sid})),
+                Duration::from_secs(8),
+            )
+            .await
+            .unwrap()
+    });
+    wait_for_inflight_forwarded(&handle.state(), &"slow-input".to_string()).await;
+    let event = EventFrame {
+        event: EventKind::SessionUserInterrupt,
+        payload: json!({"session_id":sid}),
+    };
+    sink.lock()
+        .await
+        .send(Message::Text(serde_json::to_string(&event).unwrap()))
+        .await
+        .unwrap();
+    wait_for_session_interrupt_pending(&handle.state(), &sid).await;
+    let busy = ipc
+        .call::<_, serde_json::Value>(
+            "resume-busy",
+            Method::SessionResume,
+            Some(json!({"session_id":sid})),
+            Duration::from_secs(3),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(
+        busy.data
+            .as_ref()
+            .and_then(|d| d.get("reason"))
+            .and_then(|v| v.as_str()),
+        Some("session_busy")
+    );
+    if confirm_cleanup {
+        cleanup.notify_one();
+    }
+    let input_error = input.await.unwrap().unwrap_err();
+    if confirm_cleanup {
+        assert_eq!(input_error.code, ErrorCode::UserAborted);
+        let resumed = ipc
+            .call::<_, serde_json::Value>(
+                "resume-clean",
+                Method::SessionResume,
+                Some(json!({"session_id":sid})),
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(resumed["resumed"], true);
+    } else {
+        assert_eq!(input_error.code, ErrorCode::Timeout);
+        let error = ipc
+            .call::<_, serde_json::Value>(
+                "resume-uncertain",
+                Method::SessionResume,
+                Some(json!({"session_id":sid})),
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(error.data.unwrap()["reason"], "resume_cleanup_unconfirmed");
+        assert!(
+            handle
+                .state()
+                .session_interrupts
+                .is_pending(&bsk::daemon::sessions::SessionId(sid))
+        );
+    }
+    responder.abort();
+    handle.shutdown().await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn official_resume_waits_for_cancelled_operation_cleanup() {
+    assert_resume_cleanup_barrier(true).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn official_resume_refuses_unconfirmed_cleanup() {
+    assert_resume_cleanup_barrier(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resume_never_recreates_a_missing_session() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ipc = IpcClient::connect(&sock).await.unwrap();
+    for (params, code) in [
+        (json!({}), ErrorCode::InvalidParams),
+        (json!({"session_id":""}), ErrorCode::InvalidParams),
+        (json!({"session_id":"gone"}), ErrorCode::NotFound),
+    ] {
+        let result = ipc
+            .call::<_, serde_json::Value>(
+                "missing-resume",
+                Method::SessionResume,
+                Some(params),
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(result.code, code);
+        assert!(handle.state().sessions.is_empty());
+    }
+    handle.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn daemon_only_resume_does_not_falsely_unlock_a_custom_extension() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    handshake_as_ext_version(&mut ws, "1.5").await;
+    let responder = tokio::spawn(async move {
+        while let Some(Ok(Message::Text(text))) = ws.next().await {
+            let Ok(Frame::Request(request)) = serde_json::from_str::<Frame>(&text) else {
+                continue;
+            };
+            assert_eq!(request.method, Method::ToolSessionStart);
+            ws.send(Message::Text(
+                serde_json::to_string(&ResponseFrame {
+                    id: request.id,
+                    body: ResponseBody::Ok(json!({"agent_window_id":42})),
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+        }
+    });
+    let mut ipc = IpcClient::connect(&sock).await.unwrap();
+    let start = ipc
+        .call::<_, serde_json::Value>(
+            "start",
+            Method::SessionStart,
+            Some(json!({})),
+            Duration::from_secs(3),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let sid = start["session_id"].as_str().unwrap();
+    handle
+        .state()
+        .session_interrupts
+        .mark(&bsk::daemon::sessions::SessionId(sid.into()));
+    let error = ipc
+        .call::<_, serde_json::Value>(
+            "resume",
+            Method::SessionResume,
+            Some(json!({"session_id":sid})),
+            Duration::from_secs(3),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::Unsupported);
+    assert!(
+        handle
+            .state()
+            .session_interrupts
+            .is_pending(&bsk::daemon::sessions::SessionId(sid.into()))
+    );
     responder.abort();
     handle.shutdown().await;
 }

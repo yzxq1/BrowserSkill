@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SessionResumeResult",
+  "type": "object",
+  "required": [
+    "resumed",
+    "session_id",
+    "was_paused"
+  ],
+  "properties": {
+    "resumed": {
+      "type": "boolean"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "was_paused": {
+      "description": "False when the session was not paused (idempotent resume).",
+      "type": "boolean"
+    }
+  }
+}

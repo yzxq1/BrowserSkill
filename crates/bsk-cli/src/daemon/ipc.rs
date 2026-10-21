@@ -135,7 +135,11 @@ impl DaemonStatus {
             .sessions
             .snapshot()
             .into_iter()
-            .map(|s| s.status_entry())
+            .map(|s| {
+                let mut entry = s.status_entry();
+                entry.paused = Some(state.session_interrupts.is_pending(&s.id));
+                entry
+            })
             .collect();
         StatusResult {
             daemon_version: self.daemon_version.to_string(),
@@ -257,6 +261,7 @@ pub fn full_handler(status: DaemonStatus, state: Arc<DaemonState>) -> RpcHandler
                     Ok(v) => ResponseBody::Ok(v),
                     Err(e) => ResponseBody::Err(e),
                 },
+                Method::SessionResume => handle_session_resume(&state, params),
                 Method::SessionList => handle_session_list(&state),
                 Method::BrowserList => match handle_browser_list(&state, params).await {
                     Ok(v) => ResponseBody::Ok(v),
@@ -434,24 +439,6 @@ async fn handle_tool_dispatch(
             data: None,
         });
     }
-    // Pre-flight: if the user has clicked the agent-window mask's
-    // stop button, every session carries a one-shot "pending
-    // interrupt" marker. The marker is consumed by the next method
-    // that dispatches browser/page input (which is rejected with
-    // `UserAborted`). Passive reads and control-plane RPCs pass through
-    // transparently — gating them would prevent the agent from observing
-    // page state before asking the user, or from cleanly tearing down the
-    // session. Classification lives on `Method::effect()` so adding a new
-    // tool variant requires an explicit classification call.
-    if method.requires_interrupt_gate_with_params(&params)
-        && state.session_interrupts.try_consume(&session_id)
-    {
-        return ResponseBody::Err(RpcError {
-            code: ErrorCode::UserAborted,
-            message: "tool dispatch rejected: pending user interrupt. The user explicitly requested to stop. Ask the user how to proceed before issuing further actions.".into(),
-            data: None,
-        });
-    }
     let timeout = match tool_dispatch_transport_timeout(&method, &params) {
         Ok(timeout) => timeout,
         Err(err) => return ResponseBody::Err(err),
@@ -466,6 +453,19 @@ async fn handle_tool_dispatch(
             });
         }
     };
+    // Register first: an interrupt either cancels this inflight entry or is
+    // observed here. A call must not slip between cancellation and marking.
+    // Official snapshot can reassert a remembered hover, so it is not a
+    // guaranteed passive read while paused. Status/tab-list/console remain usable.
+    if (method.requires_interrupt_gate_with_params(&params) || method == Method::ToolSnapshot)
+        && state.session_interrupts.is_pending(&session_id)
+    {
+        return ResponseBody::Err(RpcError {
+            code: ErrorCode::UserAborted,
+            message: "Session paused by user Interrupt. Ask how to proceed; only after the user explicitly asks to continue, run `bsk session resume SESSION_ID`.".into(),
+            data: Some(serde_json::json!({"reason":"session_paused"})),
+        });
+    }
     if method == Method::ToolDebug
         && matches!(
             params.get("action").and_then(Value::as_str),
@@ -1392,12 +1392,82 @@ async fn handle_session_stop_all(
     Ok(serde_json::to_value(result).unwrap_or(Value::Null))
 }
 
+/// Clear a user-Interrupt pause. Purely daemon-side, so it works with the
+/// official extension: paused calls were rejected here and never reached
+/// the browser; the extension restores its control overlay on the next
+/// browser-control call. Never replays the interrupted operation.
+fn handle_session_resume(state: &Arc<DaemonState>, params: Value) -> ResponseBody {
+    let params: bsk_protocol::tools::SessionResumeParams = match serde_json::from_value(params) {
+        Ok(params) => params,
+        Err(error) => return ResponseBody::Err(invalid_params(error.to_string())),
+    };
+    if params.session_id.is_empty() {
+        return ResponseBody::Err(invalid_params("session_id is required"));
+    }
+    let sid = SessionId(params.session_id.clone());
+    let Some(session) = state.sessions.get(&sid) else {
+        return ResponseBody::Err(RpcError {
+            code: ErrorCode::NotFound,
+            message: format!(
+                "session {} not found; it cannot be resumed",
+                params.session_id
+            ),
+            data: None,
+        });
+    };
+    let Some(browser) = state.browsers.get(&session.browser_id) else {
+        return ResponseBody::Err(RpcError {
+            code: ErrorCode::NotFound,
+            message: "The session's browser is no longer connected".into(),
+            data: None,
+        });
+    };
+    if !bsk_protocol::tools::supports_daemon_only_resume(&browser.extension_protocol_version) {
+        return ResponseBody::Err(RpcError {
+            code: ErrorCode::Unsupported,
+            message: "This branch supports daemon-only resume with official extension protocols 1.3/1.4. A custom or newer extension may have its own persistent pause; use its matching bsk build instead.".into(),
+            data: Some(serde_json::json!({"reason":"unsupported_feature", "component":"extension", "actual_protocol":browser.extension_protocol_version})),
+        });
+    }
+    let generation = state.session_interrupts.generation(&sid);
+    let outcome = state.tool_queues.with_idle(&sid, || {
+        if state.tool_inflight.has_session(&sid) {
+            return Err(super::queue::DispatchError::SessionBusy.into_rpc());
+        }
+        if !state
+            .session_interrupts
+            .clear_if_generation(&sid, generation)
+        {
+            return Err(RpcError {
+                code: ErrorCode::UserAborted,
+                message: "session was interrupted again while resuming; still paused".into(),
+                data: None,
+            });
+        }
+        state.sessions.touch(&sid);
+        Ok(bsk_protocol::tools::SessionResumeResult {
+            session_id: params.session_id,
+            resumed: true,
+            was_paused: generation.is_some(),
+        })
+    });
+    match outcome {
+        Ok(Ok(result)) => ResponseBody::Ok(serde_json::to_value(result).unwrap_or(Value::Null)),
+        Ok(Err(error)) => ResponseBody::Err(error),
+        Err(error) => ResponseBody::Err(error.into_rpc()),
+    }
+}
+
 fn handle_session_list(state: &Arc<DaemonState>) -> ResponseBody {
     let sessions: Vec<_> = state
         .sessions
         .snapshot()
         .into_iter()
-        .map(|s| s.status_entry())
+        .map(|s| {
+            let mut entry = s.status_entry();
+            entry.paused = Some(state.session_interrupts.is_pending(&s.id));
+            entry
+        })
         .collect();
     ResponseBody::Ok(serde_json::to_value(SessionListResult { sessions }).unwrap_or(Value::Null))
 }

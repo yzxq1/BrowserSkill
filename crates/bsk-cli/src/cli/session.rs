@@ -42,6 +42,9 @@ pub struct SessionCmd {
 pub enum SessionSub {
     /// Start a new session against the (single) connected browser.
     Start(SessionStartArgs),
+    /// Resume a session paused by the user's Interrupt (only when the user
+    /// explicitly asks to continue). Does not replay the interrupted action.
+    Resume(SessionResumeArgs),
     /// Stop a single session, or all sessions with `--all`.
     Stop(SessionStopArgs),
     /// List active sessions.
@@ -101,6 +104,13 @@ fn window_size(s: &str) -> Result<u32, String> {
             "window dimension {value} out of range (100..=7680)"
         ))
     }
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SessionResumeArgs {
+    /// Session id to resume.
+    #[arg(value_name = "SESSION_ID")]
+    pub session_id: String,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -194,6 +204,7 @@ pub fn dispatch(cmd: SessionCmd, format: Format) -> Result<(), CliError> {
             }
             run_start(info.sock_path, args, format)
         }
+        SessionSub::Resume(args) => run_resume(info.sock_path, args, format),
         SessionSub::Stop(args) => run_stop(info.sock_path, args, format),
         SessionSub::List => run_list(info.sock_path, format),
         SessionSub::Request(args) => {
@@ -572,6 +583,34 @@ fn run_stop(sock: PathBuf, args: SessionStopArgs, format: Format) -> Result<(), 
     Ok(())
 }
 
+fn run_resume(sock: PathBuf, args: SessionResumeArgs, format: Format) -> Result<(), CliError> {
+    let reply: bsk_protocol::tools::SessionResumeResult = call(
+        sock,
+        Method::SessionResume,
+        Some(bsk_protocol::tools::SessionResumeParams {
+            session_id: args.session_id,
+        }),
+        Duration::from_secs(10),
+    ).map_err(|error| match error {
+        CliError::Rpc { code: ErrorCode::UnknownMethod, .. } => CliError::from_rpc(bsk_protocol::RpcError {
+            code: ErrorCode::Unsupported,
+            message: "The connected daemon does not support session.resume. Use this branch's bsk binary and restart its daemon after existing tasks finish; the official Chrome extension does not need replacing.".into(),
+            data: Some(serde_json::json!({"reason":"unsupported_feature","component":"daemon"})),
+        }),
+        other => other,
+    })?;
+    match format {
+        Format::Json => println!(
+            "{}",
+            serde_json::to_string_pretty(&reply)
+                .map_err(|e| CliError::Local(anyhow::anyhow!(e)))?
+        ),
+        Format::Human if reply.was_paused => println!("resumed {}", reply.session_id),
+        Format::Human => println!("{} was not paused", reply.session_id),
+    }
+    Ok(())
+}
+
 fn run_list(sock: PathBuf, format: Format) -> Result<(), CliError> {
     let reply: ListReply = call::<(), _>(sock, Method::SessionList, None, Duration::from_secs(5))?;
     match format {
@@ -603,7 +642,7 @@ fn run_list(sock: PathBuf, format: Format) -> Result<(), CliError> {
                 .unwrap_or(0)
                 .max(headers.1.len());
             println!(
-                "{:<session_w$}  {:<browser_w$}  {}",
+                "{:<session_w$}  {:<browser_w$}  {}  STATE",
                 headers.0, headers.1, headers.2,
             );
             for s in &reply.sessions {
@@ -612,8 +651,15 @@ fn run_list(sock: PathBuf, format: Format) -> Result<(), CliError> {
                     .map(|w| w.to_string())
                     .unwrap_or_else(|| "-".into());
                 println!(
-                    "{:<session_w$}  {:<browser_w$}  {}",
-                    s.session_id, s.browser_instance_id, window,
+                    "{:<session_w$}  {:<browser_w$}  {}  {}",
+                    s.session_id,
+                    s.browser_instance_id,
+                    window,
+                    match s.paused {
+                        Some(true) => "paused",
+                        Some(false) => "active",
+                        None => "unknown",
+                    },
                 );
             }
         }
@@ -913,5 +959,71 @@ mod i3_tests {
         let stderr = render_human_to_string(&cli, Some(&extras));
         assert!(!stderr.contains("connected browsers:"));
         assert!(stderr.contains("details: requested browser is not connected"));
+    }
+}
+
+#[cfg(test)]
+mod resume_tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn resume_requires_a_session_id() {
+        assert!(crate::cli::Cli::try_parse_from(["bsk", "session", "resume"]).is_err());
+        let cli =
+            crate::cli::Cli::try_parse_from(["bsk", "session", "resume", "original", "--json"])
+                .unwrap();
+        assert!(
+            matches!(cli.command, crate::cli::Command::Session(SessionCmd { sub:SessionSub::Resume(args) }) if args.session_id=="original")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn resume_against_an_old_daemon_explains_what_to_update() {
+        use crate::daemon::ipc;
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("daemon.sock");
+        let listener = ipc::bind(&socket).await.unwrap();
+        let handler: ipc::RpcHandler = Arc::new(|_, method, _| {
+            Box::pin(async move {
+                assert_eq!(method, Method::SessionResume);
+                bsk_protocol::ResponseBody::Err(bsk_protocol::RpcError {
+                    code: ErrorCode::UnknownMethod,
+                    message: "old daemon".into(),
+                    data: None,
+                })
+            })
+        });
+        let server = tokio::spawn(ipc::serve(
+            listener,
+            handler,
+            || {},
+            || {},
+            || {},
+            std::future::pending::<()>(),
+        ));
+        let error = tokio::task::spawn_blocking(move || {
+            run_resume(
+                socket,
+                SessionResumeArgs {
+                    session_id: "original".into(),
+                },
+                Format::Json,
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            CliError::Rpc {
+                code: ErrorCode::Unsupported,
+                ..
+            }
+        ));
+        assert!(error.to_string().contains("restart its daemon"));
+        assert!(error.to_string().contains("does not need replacing"));
+        server.abort();
+        let _ = server.await;
     }
 }

@@ -53,6 +53,19 @@ applies to element names and labels you pass back to `click`, `fill` or `select`
 These tools run in the user's real, logged-in profile, so anything you are
 induced to do is done with their sessions.
 
+## 本分支：保留官方扩展的 Interrupt 恢复
+
+本分支不修改 Chrome 扩展，也不实现现有窗口追加。默认仍使用官方 Agent Window。
+
+- 官方扩展的 Interrupt 通知到达本分支 daemon 后，会话持续暂停；后续输入不会消费暂停标记。
+- 尊重用户停止。用户明确说“继续”后，先检查 `bsk session list --json` 中原会话是否仍在、`paused` 状态如何，再执行 `bsk session resume <SESSION_ID>`；不得自动执行恢复来绕过中断。
+- `resume` 只解除 daemon 的暂停，不新开窗口、不重建会话、不刷新页面、不重放旧动作。官方扩展会在下一次控制类工具调用时恢复遮罩；恢复后重新 observe 并使用新 refs。
+- 若仍在清理旧请求，会返回 busy。清理超时或失败时拒绝恢复，先检查页面，不假装恢复成功、不自动重新建会话。
+- 暂停期间可用 session list、tab list、console 等状态读取及 session stop；官方 snapshot 可重发 hover，因此也被暂停门禁拦截。
+- 已验证官方扩展协议 1.3/1.4。不适配另一分支具有独立持久暂停的定制扩展（协议 1.5），不要把 daemon-only 成功误当成解除了浏览器本地暂停。
+- Interrupt 通知若没送达 daemon，本分支无法在浏览器内独立暂停。会话丢失或重启后不能恢复；不得切换 Profile 或接管另一任务来假装继续。
+- 使用定制构建时设置 `BSK_AUTO_UPDATE=off`，避免被上游自动更新覆盖；不要为切换而重启其他任务共享的 daemon。
+
 ## Task workflow
 
 1. Define success from the user's request. For a required browser profile, follow

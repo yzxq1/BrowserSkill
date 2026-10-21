@@ -41,6 +41,8 @@ fn main() {
     dump!(StatusResult, "system_status_result");
     dump!(BrowserListParams, "browser_list_params");
 
+    dump!(SessionResumeParams, "session_resume_params");
+    dump!(SessionResumeResult, "session_resume_result");
     dump!(CancelParams, "cancel_params");
     dump!(CancelResult, "cancel_result");
 
