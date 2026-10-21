@@ -36,7 +36,7 @@ describe("computeConnectedState (protocol-based compat)", () => {
   });
 
   it("returns version_skew when daemon protocol minor is newer", () => {
-    expect(computeConnectedState(handshake("1.6", PROTOCOL_VERSION))).toEqual({
+    expect(computeConnectedState(handshake("1.7", PROTOCOL_VERSION))).toEqual({
       kind: "version_skew",
     });
   });
@@ -56,11 +56,11 @@ describe("computeConnectedState (protocol-based compat)", () => {
   });
 
   it("rejects when extension is below daemon min_compatible_protocol", () => {
-    const result = computeConnectedState(handshake("1.6", "1.6"));
+    const result = computeConnectedState(handshake("1.7", "1.7"));
     expect(result.kind).toBe("rejected");
     if (result.kind === "rejected") {
       expect(result.reason).toContain("min_compatible_protocol");
-      expect(result.reason).toContain("1.6");
+      expect(result.reason).toContain("1.7");
     }
   });
 

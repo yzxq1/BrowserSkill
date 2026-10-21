@@ -30,6 +30,10 @@ import {
 import { nextOverlayVersion } from "@/lib/overlay-version";
 import { POPUP_PORT_NAME, type PopupInbound, type PopupOutbound } from "@/lib/popup-bridge";
 import { recordFrameCoordinator } from "@/lib/recording/frame-coordinator";
+import {
+  attachSessionControlBridge,
+  type SessionControlBridge,
+} from "@/lib/session-control-bridge";
 import { attachSessionsLiveFlag } from "@/lib/sessions-live-flag";
 import { captureTaskPreview, focusTask } from "@/lib/task-preview";
 import { attachUiChannel } from "@/lib/ui-channel";
@@ -88,6 +92,7 @@ export default defineBackground(() => {
     },
   });
   const sessions = new SessionManager({ remote: () => remoteEndpoint !== null });
+  let sessionControlBridge: SessionControlBridge | null = null;
   const windowRouting = new AgentWindowRouting(
     sessions,
     chrome,
@@ -302,7 +307,7 @@ export default defineBackground(() => {
 
   function onBrowserControlResumed(sessionId: string): void {
     const ctx = sessions.get(sessionId);
-    if (!ctx) return;
+    if (!ctx || sessionControlBridge?.isResuming(sessionId)) return;
     setControlMode(sessionId, "control");
   }
 
@@ -434,6 +439,13 @@ export default defineBackground(() => {
     }),
   });
   dispatcher.start();
+  sessionControlBridge = attachSessionControlBridge({
+    sessions,
+    dispatcher,
+    transport,
+    onPaused: (sessionId) => setControlMode(sessionId, "paused"),
+    onResumed: (sessionId) => setControlMode(sessionId, "control"),
+  });
   if (typeof chrome.notifications?.onClicked?.addListener === "function") {
     attachBorrowNotificationClickHandler({
       onClicked: chrome.notifications.onClicked,

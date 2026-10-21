@@ -518,6 +518,24 @@ async fn handle_inbound_text(state: &Arc<DaemonState>, client: &Arc<BrowserClien
             }
         },
         Frame::Request(req) => {
+            if req.method == bsk_protocol::Method::SessionResume {
+                // Resume itself awaits a tool.session_resume response from this
+                // same socket. Never block its read loop waiting for that reply.
+                let state = Arc::clone(state);
+                let client = Arc::clone(client);
+                tokio::spawn(async move {
+                    let body = handle_extension_session_resume(
+                        &state,
+                        &client,
+                        req.params.unwrap_or_default(),
+                    )
+                    .await;
+                    let _ = client
+                        .sink
+                        .send(Frame::Response(ResponseFrame { id: req.id, body }));
+                });
+                return;
+            }
             let body = if req.method == bsk_protocol::Method::AuditRequest {
                 handle_audit_request(state, &client.id.0, req.params.unwrap_or_default())
             } else {
@@ -532,6 +550,40 @@ async fn handle_inbound_text(state: &Arc<DaemonState>, client: &Arc<BrowserClien
                 .send(Frame::Response(ResponseFrame { id: req.id, body }));
         }
     }
+}
+
+async fn handle_extension_session_resume(
+    state: &Arc<DaemonState>,
+    client: &Arc<BrowserClient>,
+    params: serde_json::Value,
+) -> ResponseBody {
+    let session_id = params
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let Some(session) = state
+        .sessions
+        .get(&super::sessions::SessionId(session_id.into()))
+    else {
+        return ResponseBody::Err(RpcError {
+            code: bsk_protocol::ErrorCode::NotFound,
+            message: "Session no longer exists".into(),
+            data: None,
+        });
+    };
+    if session.browser_id != client.id
+        || !state
+            .browsers
+            .get(&client.id)
+            .is_some_and(|current| Arc::ptr_eq(&current, client))
+    {
+        return ResponseBody::Err(RpcError {
+            code: bsk_protocol::ErrorCode::PermissionDenied,
+            message: "A browser may only resume its own sessions on its live connection".into(),
+            data: None,
+        });
+    }
+    super::ipc::handle_session_resume(state, params).await
 }
 
 fn handle_audit_request(
@@ -691,6 +743,8 @@ fn handle_session_user_interrupt(
         );
         return;
     }
+    state.session_interrupts.mark(&sid);
+    state.sessions.touch(&sid);
     let snapshots = state.tool_inflight.cancel_session(&sid);
     info!(session = %sid, count = snapshots.len(), "user-interrupt: cancelled inflight tools");
 
@@ -709,7 +763,6 @@ fn handle_session_user_interrupt(
     }
 
     state.audit.marker(&sid.0, "user_interrupt");
-    state.session_interrupts.mark(&sid);
 }
 
 #[cfg(test)]

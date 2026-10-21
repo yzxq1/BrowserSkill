@@ -408,7 +408,7 @@ fn paused_error() -> RpcError {
         data: Some(serde_json::json!({"reason":"session_paused"})) }
 }
 
-async fn handle_session_resume(state: &Arc<DaemonState>, params: Value) -> ResponseBody {
+pub(super) async fn handle_session_resume(state: &Arc<DaemonState>, params: Value) -> ResponseBody {
     let params: bsk_protocol::tools::SessionResumeParams = match serde_json::from_value(params) {
         Ok(params) => params,
         Err(error) => return ResponseBody::Err(invalid_params(error.to_string())),
@@ -474,6 +474,8 @@ async fn handle_session_resume(state: &Arc<DaemonState>, params: Value) -> Respo
                 .session_interrupts
                 .clear_if_generation(&sid, generation)
             {
+                state.sessions.touch(&sid);
+                state.audit.marker(&sid.0, "resumed");
                 ResponseBody::Ok(value)
             } else {
                 ResponseBody::Err(paused_error())

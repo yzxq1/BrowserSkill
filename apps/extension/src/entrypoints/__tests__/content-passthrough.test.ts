@@ -1,4 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ControlOverlay } from "@/content/ControlOverlay";
+import { PausedOverlay } from "@/content/PausedOverlay";
+
+const { rendered } = vi.hoisted(() => ({ rendered: [] as any[] }));
+
 import { INPUT_PASSTHROUGH, INPUT_PASSTHROUGH_ATTR } from "@/lib/input-passthrough-bridge";
 import {
   OVERLAY_AGENT_OVERLAY_RESET,
@@ -13,7 +18,14 @@ vi.hoisted(() => {
 });
 // Exercise the real content entrypoint/controller wiring without mounting React components.
 vi.mock("react-dom/client", () => ({
-  default: { createRoot: () => ({ render() {}, unmount() {} }) },
+  default: {
+    createRoot: () => ({
+      render(value: unknown) {
+        rendered.push(value);
+      },
+      unmount() {},
+    }),
+  },
 }));
 vi.mock("@/lib/instance-id", () => ({
   getControlHintsHidden: async () => false,
@@ -26,6 +38,7 @@ let dispose: (() => void) | undefined;
 afterEach(() => {
   dispose?.();
   dispose = undefined;
+  rendered.length = 0;
   document.querySelectorAll("browser-skill-overlay").forEach((host) => host.remove());
   vi.clearAllTimers();
   vi.useRealTimers();
@@ -99,7 +112,10 @@ async function fixture(pendingVideoQuery = false) {
   const active = () => host.hasAttribute(INPUT_PASSTHROUGH_ATTR);
   const blocking = () => host.hasAttribute("data-bsk-overlay-blocking");
   state();
-  return { send, version, state, reset, begin, active, blocking, remount: () => mount() };
+  const props = (type: unknown) =>
+    rendered.at(-1).props.children.props.children.find((element: any) => element.type === type)
+      .props;
+  return { send, version, state, reset, begin, active, blocking, props, remount: () => mount() };
 }
 
 it("mounts and registers listeners without showing controls before video discovery", async () => {
@@ -223,4 +239,51 @@ describe("overlay state ordering", () => {
     f.state("one", "control", { epoch: "worker", generation: 30 });
     expect(f.blocking()).toBe(false);
   });
+});
+
+it("keeps a paused identity and Continue button after the Interrupt acknowledgement", async () => {
+  const f = await fixture();
+  let acknowledge!: (value: unknown) => void;
+  vi.mocked(chrome.runtime.sendMessage).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        acknowledge = resolve;
+      }),
+  );
+  f.props(ControlOverlay).onInterrupt();
+  f.state("one", "paused");
+  acknowledge({ ok: true });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(f.props(PausedOverlay).visible).toBe(true);
+  expect(f.blocking()).toBe(false);
+});
+
+it("does not let a late Interrupt acknowledgement undo a newer confirmed resume", async () => {
+  const f = await fixture();
+  let acknowledge!: (value: unknown) => void;
+  vi.mocked(chrome.runtime.sendMessage).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        acknowledge = resolve;
+      }),
+  );
+  f.props(ControlOverlay).onInterrupt();
+  f.state("one", "paused");
+  f.state("one", "control");
+  acknowledge({ ok: true });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(f.props(ControlOverlay).visible).toBe(true);
+  expect(f.props(PausedOverlay).visible).toBe(false);
+});
+
+it("does not restore the blocker optimistically from a Continue reply alone", async () => {
+  const f = await fixture();
+  f.state("one", "paused");
+  vi.mocked(chrome.runtime.sendMessage).mockResolvedValueOnce({ ok: true });
+  f.props(PausedOverlay).onResume();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(f.props(PausedOverlay).visible).toBe(true);
+  expect(f.blocking()).toBe(false);
+  f.state("one", "control");
+  expect(f.props(ControlOverlay).visible).toBe(true);
 });

@@ -2,7 +2,7 @@
   "popup": {
     "interactionCompatibilityWarning": "Connesso a un daemon precedente (protocollo v{{cliProtocol}}). Aggiorna la CLI e il daemon per supportare completamente le impostazioni di automazione.",
     "brandCategory": "Automazione del browser",
-    "brandName": "BrowserSkill",
+    "brandName": "BrowserSkill-2",
     "stateLabel": {
       "disconnected": "Disconnesso",
       "connecting": "Connessione…",
@@ -665,5 +665,19 @@
     "agentHint": "Tell your agent to record before starting the task. It will start and stop recording for you; preview and save the result here.",
     "manual": "Record a running task manually",
     "copyFailed": "Could not copy the prompt. Please try again."
+  },
+  "resumeOverlay": {
+    "paused": "Task paused",
+    "resume": "Continue",
+    "resuming": "Resuming…",
+    "tasks": "Paused tasks",
+    "task": "Task {{sessionId}}",
+    "hint": "Restore control without replaying cancelled actions. If the AI conversation has stopped, tell the agent to continue.",
+    "error_busy": "The previous action is still finishing cleanup. Wait, then click Continue again.",
+    "error_disconnected": "Not connected or confirmation timed out. The task remains paused.",
+    "error_unsupported": "Update to the matching bsk daemon to use this Continue button.",
+    "error_interrupted": "Interrupted again. The task remains paused.",
+    "error_stale": "This session no longer exists. It was not recreated.",
+    "error_failed": "Could not confirm recovery. The task remains paused."
   }
 }

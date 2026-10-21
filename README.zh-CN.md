@@ -1,5 +1,7 @@
 # BrowserSkill
 
+> **BrowserSkill-2（蓝色图标）**：本分支新增页面和扩展弹窗的“继续执行”按钮，配套 daemon 协议 1.6。[使用、安装与验证说明](docs/extension-click-resume.zh-CN.md)。
+
 > **此分支为本地定制版**：新增 `session start --window current`，在现有窗口末尾后台追加任务页；新增 `session resume`，明确恢复被 Interrupt 暂停的原会话。默认独立窗口模式保留。见[使用与构建说明](docs/fork-existing-window.zh-CN.md)。
 
 <p align="center">

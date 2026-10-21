@@ -40,6 +40,12 @@ export async function withChrome(
         ...(headless ? ["--headless=new"] : []),
         "--no-first-run",
         "--no-default-browser-check",
+        // Test profiles never need the user's Keychain, passwords or sync.
+        "--use-mock-keychain",
+        "--password-store=basic",
+        "--disable-sync",
+        "--disable-component-update",
+        "--disable-background-networking",
         ...(extensionPath
           ? [
               ...(softwareRendering

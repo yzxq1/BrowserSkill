@@ -2,7 +2,7 @@
   "popup": {
     "interactionCompatibilityWarning": "이전 Daemon에 연결되었습니다(프로토콜 v{{cliProtocol}}). 자동화 설정을 완전히 지원하려면 CLI와 Daemon을 업데이트하세요.",
     "brandCategory": "브라우저 자동화",
-    "brandName": "BrowserSkill",
+    "brandName": "BrowserSkill-2",
     "stateLabel": {
       "disconnected": "연결되지 않음",
       "connecting": "연결 중…",
@@ -665,5 +665,19 @@
     "agentHint": "Tell your agent to record before starting the task. It will start and stop recording for you; preview and save the result here.",
     "manual": "Record a running task manually",
     "copyFailed": "Could not copy the prompt. Please try again."
+  },
+  "resumeOverlay": {
+    "paused": "Task paused",
+    "resume": "Continue",
+    "resuming": "Resuming…",
+    "tasks": "Paused tasks",
+    "task": "Task {{sessionId}}",
+    "hint": "Restore control without replaying cancelled actions. If the AI conversation has stopped, tell the agent to continue.",
+    "error_busy": "The previous action is still finishing cleanup. Wait, then click Continue again.",
+    "error_disconnected": "Not connected or confirmation timed out. The task remains paused.",
+    "error_unsupported": "Update to the matching bsk daemon to use this Continue button.",
+    "error_interrupted": "Interrupted again. The task remains paused.",
+    "error_stale": "This session no longer exists. It was not recreated.",
+    "error_failed": "Could not confirm recovery. The task remains paused."
   }
 }
