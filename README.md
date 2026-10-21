@@ -45,6 +45,10 @@ Use the `bsk` CLI with Cursor, Claude Code, Codex, OpenClaw, CodeBuddy, WorkBudd
 
 | Capability | What it gives you |
 | --- | --- |
+| **Existing Window Append (bsk2)** | Append task tabs silently to your active window in the background **without popup windows or focus theft**; user windows are never closed. |
+| **Interrupt & Click-to-Resume (bsk2)** | Clicking Interrupt persistently pauses the session without closing pages; resume anytime via **on-page / popup "Continue" button** or CLI CAS. |
+| **Extension Strategy Controls (bsk2)** | Toggle between **Append Mode** vs **Dedicated Agent Window**, and configure whether to **auto-close task tabs on completion** directly in popup. |
+| **Full Multi-instance Isolation (bsk2)** | Dedicated `bsk2` binary, independent port `52801`, and `~/.bsk2` directory. Fully coexists with the official version without interference. |
 | **Work with your existing accounts** | Use the browser's current login state to read documents, search internal sites, fill forms, and complete web workflows. |
 | **Keep browser tasks visible** | Give the agent its own window, borrow an existing tab when needed, and take over for login, verification, or other human-only steps. |
 | **Read, interact, and capture** | Inspect page text and controls, click and type, manage tabs, capture viewport or full-page screenshots, and upload or download files in local mode. |
