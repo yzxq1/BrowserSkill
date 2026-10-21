@@ -95,7 +95,7 @@ export default defineConfig({
       __BSK_EXT_BUILD__: JSON.stringify(EXTENSION_BUILD),
       __BSK_EXT_VERSION__: JSON.stringify(EXTENSION_VERSION),
       __BSK_DAEMON_WS_URL__: JSON.stringify(
-        process.env.BSK_DAEMON_WS_URL ?? "ws://127.0.0.1:52800",
+        process.env.BSK_DAEMON_WS_URL ?? "ws://127.0.0.1:52801",
       ),
     },
     resolve: {

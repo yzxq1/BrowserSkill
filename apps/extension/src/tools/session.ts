@@ -3,6 +3,7 @@ import {
   type InteractionPreferenceStore,
   interactionPolicy,
 } from "@/lib/interaction-preferences";
+import { agentPreferences } from "@/lib/agent-preferences";
 import { withTaskPreviewStop } from "@/lib/task-preview";
 import { type SessionManager, SessionStartCleanupError } from "@/session-manager/manager";
 import { detectBrowserMeta } from "@/transport/handshake";
@@ -159,8 +160,22 @@ export async function handleSessionStart(
   if (isRpcError(sizeOrErr)) return sizeOrErr;
   try {
     await deps.preferences?.readyOrFallback();
+    await agentPreferences.ready();
+    const popupPrefs = agentPreferences.get();
+    let effectiveWindowId = params.window_id;
+    if (
+      effectiveWindowId === undefined &&
+      !params.incognito &&
+      params.width === undefined &&
+      params.height === undefined &&
+      !params.focused
+    ) {
+      if (popupPrefs.windowStrategy === "existing") {
+        effectiveWindowId = -1;
+      }
+    }
     const ctx = await manager.start(params.session_id, {
-      windowId: params.window_id,
+      windowId: effectiveWindowId,
       incognito: params.incognito,
       size: sizeOrErr,
       focused: params.focused,
@@ -360,6 +375,24 @@ async function stopSession(
       ...ctx.borrowedTabs.keys(),
       ...(ctx.observedTabs ?? []),
     ]);
+    // Check autoCloseTabs preference
+    await agentPreferences.ready();
+    const shouldCloseTabs = agentPreferences.get().autoCloseTabs;
+    if (shouldCloseTabs) {
+      const tabsApi = deps.tabManagement?.tabs;
+      for (const tabId of ctx.agentCreatedTabs) {
+        try {
+          if (tabsApi) {
+            await tabsApi.remove(tabId);
+          } else if (typeof chrome !== "undefined" && chrome.tabs?.remove) {
+            await chrome.tabs.remove(tabId);
+          }
+        } catch (err) {
+          console.warn(`[bsk2 session_stop] failed to auto-close tab ${tabId}`, err);
+        }
+      }
+    }
+
     await manager.stop(params.session_id, { dropOnly: true });
     const reset = deps.tabManagement?.agentOverlayReset ?? chromeAgentOverlayResetApi;
     for (const tabId of controlled)

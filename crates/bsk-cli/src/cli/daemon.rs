@@ -7,7 +7,7 @@ use clap::Subcommand;
 use crate::daemon;
 
 /// Default WebSocket port the daemon listens on.
-pub const DEFAULT_WS_PORT: u16 = 52800;
+pub const DEFAULT_WS_PORT: u16 = 52801;
 /// Default daemon idle timeout (10 minutes per design §3.2).
 pub const DEFAULT_DAEMON_IDLE: Duration = Duration::from_secs(10 * 60);
 /// Default session idle timeout (5 minutes per design §5).
@@ -77,7 +77,7 @@ pub struct StartArgs {
     /// Authorization requests per minute per peer IP, default 60 (shared behind a proxy).
     #[arg(long)]
     pub authorize_rate_limit: Option<u32>,
-    /// Override the WebSocket port (default 52800).
+    /// Override the WebSocket port (default 52801).
     #[arg(long, value_name = "PORT")]
     pub port: Option<u16>,
 
