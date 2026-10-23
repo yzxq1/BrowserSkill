@@ -129,7 +129,16 @@ pnpm ext:build
 4. 连续动作不会消费掉暂停；旧操作清理、恢复失败和再次中断不会被自动重试绕过。
 5. 默认独立窗口模式保持回归兼容。
 
-## 本轮验证（2026-10-21）
+## 本轮验证（2026-10-23，v0.3.5-bsk2）
+
+- 合并 `main`（蓝色界面、点击恢复、弹窗策略、`bsk2` / `52801` / `~/.bsk2` 隔离）与 BSK2 标签组、用户接管等待，提交 `a09998c`。
+- 扩展 TypeScript 类型检查通过；扩展全量单元测试 2732 通过、246 跳过、0 失败（合并后曾有 22 项失败，已修复）。
+- Rust 全工作区 872 通过、1 忽略、0 失败；`cargo fmt --check`、`cargo build --release --locked` 通过。修正了改名 `bsk2` 后集成测试仍引用 `CARGO_BIN_EXE_bsk`、测试写入真实 `~/.bsk2` 的问题。
+- `pnpm lint` 通过，含 DSH plugin 538 项测试。
+- 扩展构建产物 manifest：`BrowserSkill-2 0.3.5`，含 `tabGroups` 权限，不含 `key`（扩展 ID 仍由加载目录决定）。
+- 本机已部署：`~/.local/bin/bsk2` 0.3.5、daemon 端口 52801；Chrome 加载目录 `~/ChromeExtensions/BrowserSkill-2` 已同步为 0.3.5，需在 `chrome://extensions` 点刷新。
+
+## 早期验证（2026-10-21）
 
 - 扩展 TypeScript 类型检查、`pnpm ext:build`：通过。
 - 扩展全量单元测试：2705 通过、245 跳过、0 失败。跳过项包括需显式配置的浏览器集成测试，不表示这些测试已执行。
