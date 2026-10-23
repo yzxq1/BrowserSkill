@@ -360,6 +360,9 @@ async function stopSession(
       ...ctx.borrowedTabs.keys(),
       ...(ctx.observedTabs ?? []),
     ]);
+    // The shared-window session leaves every page open, but removes its
+    // temporary visual ownership marker before releasing authority.
+    await manager.ungroupControlledTabs(ctx, controlled);
     await manager.stop(params.session_id, { dropOnly: true });
     const reset = deps.tabManagement?.agentOverlayReset ?? chromeAgentOverlayResetApi;
     for (const tabId of controlled)

@@ -1,9 +1,12 @@
 import { AGENT_WINDOW_HOME, type AgentWindowApi, chromeAgentWindowApi } from "./agent-window";
 import { chromeExistingWindowApi, type ExistingWindowApi } from "./existing-window";
 import { RefStore } from "./ref-store";
+import { type Bsk2TabGroupApi, chromeBsk2TabGroupApi } from "./tab-group";
 
 export interface SessionContext {
   existingWindow?: boolean;
+  /** Chrome tab group used only as a visual boundary for this shared-window session. */
+  tabGroupId?: number;
   defaultTabId?: number;
   /** Incognito sessions cannot borrow user tabs. Absent means a normal window. */
   incognito?: boolean;
@@ -50,6 +53,7 @@ export interface SessionManagerOptions {
   remote?: () => boolean;
   agentWindow?: AgentWindowApi;
   existingWindow?: ExistingWindowApi;
+  tabGroups?: Bsk2TabGroupApi;
   now?: () => number;
 }
 
@@ -116,12 +120,14 @@ export class SessionManager {
   private readonly startingSessions = new Set<string>();
   private readonly windowReservations = new Map<number, string>();
   private readonly existingWindow: ExistingWindowApi;
+  private readonly tabGroups: Bsk2TabGroupApi;
   private readonly expectedWindowClosures = new WeakSet<SessionContext>();
   private readonly agentWindow: AgentWindowApi;
   private readonly now: () => number;
 
   constructor(options: SessionManagerOptions = {}) {
     this.existingWindow = options.existingWindow ?? chromeExistingWindowApi;
+    this.tabGroups = options.tabGroups ?? chromeBsk2TabGroupApi;
     this.remote = options.remote ?? (() => false);
     this.agentWindow = options.agentWindow ?? chromeAgentWindowApi;
     this.now = options.now ?? Date.now;
@@ -153,6 +159,38 @@ export class SessionManager {
   findByWindowId(windowId: number): SessionContext | null {
     const id = this.windowIndex.get(windowId);
     return id ? (this.sessions.get(id) ?? null) : null;
+  }
+
+  /** Add an explicitly authorised shared-window tab to this session's visual group. */
+  async groupControlledTab(ctx: SessionContext, tabId: number): Promise<void> {
+    if (!ctx.existingWindow) return;
+    if (ctx.tabGroupId !== undefined) {
+      try {
+        await this.tabGroups.add(ctx.tabGroupId, tabId);
+        return;
+      } catch {
+        // The user may have manually removed the group. Recreate one from the
+        // concrete authorised tab; never search for or claim a same-named group.
+      }
+    }
+    ctx.tabGroupId = await this.tabGroups.create(tabId);
+  }
+
+  /** Release visual grouping without changing the tab's control/ownership state. */
+  async ungroupControlledTab(ctx: SessionContext, tabId: number): Promise<void> {
+    if (!ctx.existingWindow || ctx.tabGroupId === undefined) return;
+    try {
+      await this.tabGroups.remove(tabId);
+    } catch {
+      // A user may have already ungrouped or closed the tab. Cleanup remains best-effort.
+    }
+  }
+
+  /** Remove every still-controlled tab from the BSK2 group before releasing a shared window. */
+  async ungroupControlledTabs(ctx: SessionContext, tabIds: Iterable<number>): Promise<void> {
+    if (!ctx.existingWindow || ctx.tabGroupId === undefined) return;
+    for (const tabId of tabIds) await this.ungroupControlledTab(ctx, tabId);
+    ctx.tabGroupId = undefined;
   }
 
   list(): SessionContext[] {
@@ -323,8 +361,17 @@ export class SessionManager {
             releasedWindowId: opts.windowId,
           });
         }
+        let tabGroupId: number;
+        try {
+          tabGroupId = await this.tabGroups.create(tabId);
+        } catch (error) {
+          throw new Error(
+            `Failed to create the BSK2 tab group for task tab ${tabId}; the tab was left open without task control: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
         const ctx: SessionContext = {
           existingWindow: true,
+          tabGroupId,
           defaultTabId: tabId,
           incognito: false,
           ...(this.remote() ? { remote: true } : {}),
@@ -429,6 +476,7 @@ export class SessionManager {
       ctx.borrowedTabs.clear();
       ctx.observedTabs?.clear();
       ctx.pendingRoutingTabs?.clear();
+      ctx.tabGroupId = undefined;
       ctx.defaultTabId = undefined;
     }
     return ctx;

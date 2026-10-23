@@ -28,7 +28,12 @@ function fixture() {
     ),
     createTaskTab: vi.fn(async () => 20),
   };
-  const manager = new SessionManager({ agentWindow, existingWindow });
+  const tabGroups = {
+    create: vi.fn(async () => 70),
+    add: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
+  };
+  const manager = new SessionManager({ agentWindow, existingWindow, tabGroups });
   const pages = new Map<number, chrome.tabs.Tab>([
     [
       10,
@@ -57,6 +62,7 @@ function fixture() {
   const detachSession = vi.fn(async () => {});
   const deps = {
     tabs,
+    tabGroups,
     agentOverlayReset: { resetAgentOverlays },
     cdp: { releaseSessionTab, detachSession },
   };
@@ -64,6 +70,7 @@ function fixture() {
     manager,
     existingWindow,
     agentWindow,
+    tabGroups,
     tabs,
     pages,
     query,
@@ -102,6 +109,7 @@ describe("existing user window sessions", () => {
     ).toMatchObject({ tabId: 20, active: false });
     expect(f.query).not.toHaveBeenCalled();
     expect(f.tabs.get).not.toHaveBeenCalledWith(10);
+    expect(f.tabGroups.create).toHaveBeenCalledWith(20);
     expect(f.agentWindow.create).not.toHaveBeenCalled();
     expect(f.agentWindow.ensureActiveTab).not.toHaveBeenCalled();
   });
@@ -137,14 +145,23 @@ describe("existing user window sessions", () => {
     expect(ctx.defaultTabId).toBe(10);
     expect(f.tabs.move).not.toHaveBeenCalled();
     expect(f.tabs.update).not.toHaveBeenCalled();
+    expect(f.tabGroups.add).toHaveBeenCalledWith(70, 10);
+    f.pages.get(10)!.groupId = 70;
     expect(await handleTabReturn(f.manager, { session_id: "a", tab_id: 10 }, f.deps)).toMatchObject(
       { tab_id: 10, returned_to_window_id: 7 },
     );
     expect(ctx.borrowedTabs.has(10)).toBe(false);
+    expect(f.tabGroups.remove).toHaveBeenCalledWith(10);
     expect(ctx.defaultTabId).toBe(20);
     expect(f.releaseSessionTab).toHaveBeenCalledWith("a", 10);
     expect(f.resetAgentOverlays).toHaveBeenCalledWith(10, "a");
     expect(f.tabs.move).not.toHaveBeenCalled();
+  });
+  it("groups subsequent task tabs in BSK2", async () => {
+    const f = fixture();
+    await f.manager.start("a", { windowId: 7 });
+    await handleTabCreate(f.manager, { session_id: "a" }, f.deps);
+    expect(f.tabGroups.add).toHaveBeenCalledWith(70, 30);
   });
   it("preserves every page and window during stop, while dropping all authority", async () => {
     const f = fixture();
@@ -165,6 +182,7 @@ describe("existing user window sessions", () => {
     expect(f.tabs.remove).not.toHaveBeenCalled();
     expect(f.tabs.move).not.toHaveBeenCalled();
     expect(f.agentWindow.remove).not.toHaveBeenCalled();
+    expect(f.tabGroups.remove).toHaveBeenCalledWith(20);
     expect(f.pages.size).toBe(2);
     expect(f.manager.get("a")).toBeNull();
     expect(isAgentControlledTab(ctx, 20)).toBe(false);

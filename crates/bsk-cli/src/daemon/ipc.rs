@@ -404,8 +404,8 @@ async fn handle_video(state: &Arc<DaemonState>, rpc_id: RpcId, params: Value) ->
 
 fn paused_error() -> RpcError {
     RpcError { code: ErrorCode::UserAborted,
-        message: "Session paused by user interrupt. Ask the user to explicitly continue, then run bsk session resume SID.".into(),
-        data: Some(serde_json::json!({"reason":"session_paused"})) }
+        message: "User has taken over this browser session. Stop browser work now: do not retry, create tabs, create a new session, or navigate. Tell the user you are waiting. Resume only after an explicit user request with bsk session resume SID, then observe again for fresh state.".into(),
+        data: Some(serde_json::json!({"reason":"session_paused", "agent_action":"wait_for_explicit_user_resume"})) }
 }
 
 async fn handle_session_resume(state: &Arc<DaemonState>, params: Value) -> ResponseBody {

@@ -5,6 +5,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 Starting from 0.2.0, CLI / Extension / DSH Plugin share the same version number.
 
+## [0.3.4-bsk2] - 2026-10-23
+
+### Added
+
+- **BSK2 shared-window tab group:** a `--window current` / `--window WINDOW_ID`
+  session creates a blue `BSK2` Chrome tab group for its background task page.
+  Explicitly created and user-approved borrowed tabs join that group; returning a
+  borrowed tab or stopping the session removes the visual grouping while retaining
+  every user window and tab.
+- **User-takeover pause guidance:** `user_aborted` now gives Agents an explicit
+  `wait_for_explicit_user_resume` instruction. The bundled skill treats it as a
+  handoff, not a retryable error: no retry, navigation, new tab, or replacement
+  session is allowed until the user explicitly asks to resume.
+
+### Changed
+
+- The extension manifest now requests Chrome's `tabGroups` permission. The
+  BSK2 tab group is a visual boundary only and never grants tab-control authority.
+
 ## [0.3.3] - 2026-10-14
 
 ### Changed

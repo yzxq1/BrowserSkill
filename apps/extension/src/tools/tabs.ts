@@ -15,6 +15,7 @@ import {
   type SessionManager,
 } from "@/session-manager/manager";
 import { beginTabCreation } from "@/session-manager/tab-creation";
+import { type Bsk2TabGroupApi, chromeBsk2TabGroupApi } from "@/session-manager/tab-group";
 import { detectBrowserMeta } from "@/transport/handshake";
 import type { RpcError } from "@/transport/types";
 import { rpcError } from "./errors";
@@ -306,6 +307,8 @@ export interface TabManagementDeps {
   cdp?: Pick<CdpRunner, "acquireBackgroundExecution" | "releaseSessionTab">;
   /** Runs after tab_return validation, before moving the borrowed tab. */
   beforeReturn?: (sessionId: string, tabId: number) => Promise<void>;
+  /** Visual BSK2 group API; only used for explicitly controlled shared-window tabs. */
+  tabGroups?: Bsk2TabGroupApi;
   /**
    * Reports whether `windowId` is any live session's Agent Window.
    * `tab_return`'s fallback window picker uses this to avoid moving a
@@ -332,6 +335,24 @@ function getIsAgentWindowId(deps: TabManagementDeps): (windowId: number) => bool
 
 function getAgentOverlayResetApi(deps: TabManagementDeps): AgentOverlayResetApi {
   return deps.agentOverlayReset ?? chromeAgentOverlayResetApi;
+}
+
+function getTabGroupsApi(deps: TabManagementDeps): Bsk2TabGroupApi {
+  return deps.tabGroups ?? chromeBsk2TabGroupApi;
+}
+
+async function ungroupReturnedExistingWindowTab(
+  ctx: SessionContext,
+  tab: chrome.tabs.Tab | undefined,
+  deps: TabManagementDeps,
+): Promise<void> {
+  if (!ctx.existingWindow || ctx.tabGroupId === undefined || tab?.groupId !== ctx.tabGroupId)
+    return;
+  try {
+    await getTabGroupsApi(deps).remove(tab.id!);
+  } catch (error) {
+    console.debug("[bsk tab_return] BSK2 group cleanup failed", error);
+  }
 }
 
 function aborted(signal: AbortSignal | undefined, tool: string): RpcError | null {
@@ -399,10 +420,11 @@ async function createTabAndCleanup(
   ctx: SessionContext,
   deps: TabManagementDeps,
   createProps: chrome.tabs.CreateProperties,
+  managerForGrouping: SessionManager,
 ): Promise<CreatedChromeTab | RpcError> {
   const finishCreation = beginTabCreation(ctx);
   try {
-    return await createAndClaimTab(ctx, deps, createProps);
+    return await createAndClaimTab(ctx, deps, createProps, managerForGrouping);
   } finally {
     finishCreation();
   }
@@ -412,6 +434,7 @@ async function createAndClaimTab(
   ctx: SessionContext,
   deps: TabManagementDeps,
   createProps: chrome.tabs.CreateProperties,
+  managerForGrouping: SessionManager,
 ): Promise<CreatedChromeTab | RpcError> {
   let tab: chrome.tabs.Tab;
   try {
@@ -428,9 +451,22 @@ async function createAndClaimTab(
   // Claim the concrete id returned by Chrome. Ownership never depends on
   // matching this request to an asynchronous onCreated event.
   ctx.agentCreatedTabs.add(tab.id);
-  if (ctx.existingWindow) ctx.defaultTabId ??= tab.id;
+  if (ctx.existingWindow) {
+    ctx.defaultTabId ??= tab.id;
+    try {
+      await managerForGrouping.groupControlledTab(ctx, tab.id);
+    } catch (error) {
+      releaseCreatedTabClaim(ctx, tab.id);
+      return {
+        code: "protocol_error",
+        message: `tab_create: failed to add tab ${tab.id} to the BSK2 group; tab was left open without task control: ${describeError(error)}`,
+        data: { resource_type: "tab", resource_id: tab.id, resource_state: "released" },
+      };
+    }
+  }
   if (aborted(deps.signal, "tab_create")) {
     if (ctx.existingWindow) {
+      await managerForGrouping.ungroupControlledTab(ctx, tab.id);
       releaseCreatedTabClaim(ctx, tab.id);
       return {
         code: "cancelled",
@@ -488,6 +524,7 @@ export async function handleTabCreate(
     ctx,
     deps,
     prepare ? { ...props, url: "about:blank" } : props,
+    manager,
   );
   if (isRpcError(tab)) return tab;
   if (prepare) {
@@ -514,6 +551,7 @@ export async function handleTabCreate(
       try {
         // Removing the last tab would implicitly remove a shared user window.
         if (!ctx.existingWindow) await getTabsApi(deps).remove(tab.id);
+        if (ctx.existingWindow) await manager.ungroupControlledTab(ctx, tab.id);
         releaseCreatedTabClaim(ctx, tab.id);
       } catch (cleanupError) {
         // Keep the claim only when closing fails, so session cleanup can retry.
@@ -1017,6 +1055,15 @@ export async function handleTabBorrow(
         originalIndex: coreResult.originalIndex,
       });
       committed = true;
+      try {
+        await manager.groupControlledTab(ctx, params.tab_id);
+      } catch (error) {
+        ctx.borrowedTabs.delete(params.tab_id);
+        return {
+          code: "protocol_error",
+          message: `tab_borrow: failed to add tab ${params.tab_id} to the BSK2 group; control was released: ${describeError(error)}`,
+        };
+      }
     } catch (err) {
       try {
         if (!ctx.existingWindow)
@@ -1243,6 +1290,7 @@ async function returnBorrowedTabCore(
     const tab = await getTabsApi(deps)
       .get(tabId)
       .catch(() => undefined);
+    await ungroupReturnedExistingWindowTab(ctx, tab, deps);
     await releaseReturnedTabState(ctx, tabId, deps);
     ctx.refStore.invalidateTab(tabId);
     if (ctx.defaultTabId === tabId) ctx.defaultTabId = ctx.agentCreatedTabs.values().next().value;
