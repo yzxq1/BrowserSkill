@@ -10,12 +10,12 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 fn bsk_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_bsk"))
+    PathBuf::from(env!("CARGO_BIN_EXE_bsk2"))
 }
 
 fn run(home: &std::path::Path, args: &[&str]) -> std::process::Output {
     Command::new(bsk_bin())
-        .env("BSK_HOME", home)
+        .env("BSK2_HOME", home)
         .env("RUST_LOG", "warn")
         .args(args)
         .output()

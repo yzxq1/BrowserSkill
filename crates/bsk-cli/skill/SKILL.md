@@ -54,6 +54,10 @@ applies to element names and labels you pass back to `click`, `fill` or `select`
 These tools run in the user's real, logged-in profile, so anything you are
 induced to do is done with their sessions.
 
+## BrowserSkill-2：可点击恢复（协议 1.6）
+
+用户可以在暂停页面角落或扩展 popup 的“已暂停的任务”列表中点“继续执行”，不必手动敲命令。按钮只恢复原浏览器会话控制，不重放已取消操作，也不能唤醒已结束的 AI 对话；若当前对话已停止，仍需用户回来发“继续”。恢复后检查状态、重新读取页面和 refs。绝不能由 Agent 自动点击“继续执行”来绕过用户 Interrupt。
+
 ## 定制分支：现有窗口与中断恢复（协议 1.5）
 
 - 用户要求不新建窗口时，使用 `bsk session start --browser <id> --window current --json`，或明确的 `--window <WINDOW_ID>`。无法确定目标窗口时停止并报告，不静默回退新窗口、其他 Profile 或其他任务会话。

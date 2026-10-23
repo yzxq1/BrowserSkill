@@ -33,9 +33,10 @@ export default defineConfig({
   outDir: "dist",
   modules: ["@wxt-dev/module-react"],
   manifest: {
-    name: "BrowserSkill",
+    name: "BrowserSkill-2",
+    version_name: `${EXTENSION_VERSION}-bsk2 (tab group + takeover)`,
     description:
-      "Let AI agents use your logged-in browser in a separate Agent Window—without interrupting your work. Powered by the bsk CLI.",
+      "BrowserSkill-2: independent blue-icon fork with existing-window tasks and clickable pause/resume. Requires the matching bsk daemon.",
     // Flat debugger sessions are required to address out-of-process iframes.
     minimum_chrome_version: "125",
     permissions: [
@@ -55,18 +56,18 @@ export default defineConfig({
     ],
     host_permissions: ["<all_urls>"],
     icons: {
-      16: "icon/logo.png",
-      32: "icon/logo.png",
-      48: "icon/logo.png",
-      128: "icon/logo.png",
+      16: "icon/logo-16.png",
+      32: "icon/logo-32.png",
+      48: "icon/logo-48.png",
+      128: "icon/logo-128.png",
     },
     action: {
-      default_title: "BrowserSkill",
+      default_title: "BrowserSkill-2",
       default_icon: {
-        16: "icon/logo.png",
-        32: "icon/logo.png",
-        48: "icon/logo.png",
-        128: "icon/logo.png",
+        16: "icon/logo-16.png",
+        32: "icon/logo-32.png",
+        48: "icon/logo-48.png",
+        128: "icon/logo-128.png",
       },
     },
   },
@@ -81,6 +82,13 @@ export default defineConfig({
             fileName: "icon/logo.png",
             source: readFileSync(LOGO_PATH),
           });
+          for (const size of [16, 32, 48, 128]) {
+            this.emitFile({
+              type: "asset",
+              fileName: `icon/logo-${size}.png`,
+              source: readFileSync(resolve(here, `assets/logo-${size}.png`)),
+            });
+          }
         },
       },
     ],
@@ -88,7 +96,7 @@ export default defineConfig({
       __BSK_EXT_BUILD__: JSON.stringify(EXTENSION_BUILD),
       __BSK_EXT_VERSION__: JSON.stringify(EXTENSION_VERSION),
       __BSK_DAEMON_WS_URL__: JSON.stringify(
-        process.env.BSK_DAEMON_WS_URL ?? "ws://127.0.0.1:52800",
+        process.env.BSK_DAEMON_WS_URL ?? "ws://127.0.0.1:52801",
       ),
     },
     resolve: {

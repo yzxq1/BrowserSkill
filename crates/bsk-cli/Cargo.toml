@@ -25,7 +25,7 @@ name = "bsk"
 path = "src/lib.rs"
 
 [[bin]]
-name = "bsk"
+name = "bsk2"
 path = "src/main.rs"
 
 [dependencies]

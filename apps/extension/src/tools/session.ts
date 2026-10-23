@@ -1,3 +1,4 @@
+import type { AgentPreferenceStore } from "@/lib/agent-preferences";
 import {
   DEFAULT_INTERACTION_PREFERENCES,
   type InteractionPreferenceStore,
@@ -77,6 +78,11 @@ export interface SessionStartResult {
 
 export interface SessionStartDeps {
   preferences?: InteractionPreferenceStore;
+  /**
+   * BSK2 popup strategy. Only the production dispatcher wires it; absent means
+   * the upstream default (dedicated Agent Window) so direct callers are unaffected.
+   */
+  agentPreferences?: Pick<AgentPreferenceStore, "ready" | "get">;
   signal?: AbortSignal;
 }
 
@@ -99,6 +105,8 @@ export interface SessionStopResult {
 }
 
 export interface SessionStopDeps {
+  /** BSK2 popup auto-close preference; absent means keep every page open. */
+  agentPreferences?: Pick<AgentPreferenceStore, "ready" | "get">;
   signal?: AbortSignal;
   cdp?: Pick<CdpRunner, "releaseSessionTab"> & {
     detachSession(sessionId: string): Promise<void>;
@@ -159,8 +167,24 @@ export async function handleSessionStart(
   if (isRpcError(sizeOrErr)) return sizeOrErr;
   try {
     await deps.preferences?.readyOrFallback();
+    // Await only when wired: an extra microtask would reorder startup vs. cancel.
+    if (deps.agentPreferences) await deps.agentPreferences.ready();
+    const popupPrefs = deps.agentPreferences?.get();
+    let effectiveWindowId = params.window_id;
+    if (
+      popupPrefs &&
+      effectiveWindowId === undefined &&
+      !params.incognito &&
+      params.width === undefined &&
+      params.height === undefined &&
+      !params.focused
+    ) {
+      if (popupPrefs.windowStrategy === "existing") {
+        effectiveWindowId = -1;
+      }
+    }
     const ctx = await manager.start(params.session_id, {
-      windowId: params.window_id,
+      windowId: effectiveWindowId,
       incognito: params.incognito,
       size: sizeOrErr,
       focused: params.focused,
@@ -360,9 +384,27 @@ async function stopSession(
       ...ctx.borrowedTabs.keys(),
       ...(ctx.observedTabs ?? []),
     ]);
-    // The shared-window session leaves every page open, but removes its
-    // temporary visual ownership marker before releasing authority.
+    // Remove the temporary BSK2 visual ownership marker before releasing
+    // authority. Pages stay open unless the user enabled auto-close below.
     await manager.ungroupControlledTabs(ctx, controlled);
+    // Optional user preference: close only tabs this session created itself.
+    if (deps.agentPreferences) await deps.agentPreferences.ready();
+    const shouldCloseTabs = deps.agentPreferences?.get().autoCloseTabs === true;
+    if (shouldCloseTabs) {
+      const tabsApi = deps.tabManagement?.tabs;
+      for (const tabId of ctx.agentCreatedTabs) {
+        try {
+          if (tabsApi) {
+            await tabsApi.remove(tabId);
+          } else if (typeof chrome !== "undefined" && chrome.tabs?.remove) {
+            await chrome.tabs.remove(tabId);
+          }
+        } catch (err) {
+          console.warn(`[bsk2 session_stop] failed to auto-close tab ${tabId}`, err);
+        }
+      }
+    }
+
     await manager.stop(params.session_id, { dropOnly: true });
     const reset = deps.tabManagement?.agentOverlayReset ?? chromeAgentOverlayResetApi;
     for (const tabId of controlled)

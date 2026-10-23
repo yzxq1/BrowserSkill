@@ -87,11 +87,21 @@ async fn handshake_as_ext_version(
     >,
     protocol: &str,
 ) -> HandshakeResult {
+    handshake_as_ext_identity(ws, protocol, TEST_EXT_ID).await
+}
+
+async fn handshake_as_ext_identity(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    protocol: &str,
+    instance_id: &str,
+) -> HandshakeResult {
     let params = HandshakeParams {
         client: "browser-skill-extension".into(),
         version: "0.1.0-dev.0".parse().unwrap(),
         protocol_version: protocol.into(),
-        instance_id: TEST_EXT_ID.into(),
+        instance_id: instance_id.into(),
         browser: BrowserPeerInfo {
             name: "chrome".into(),
             version: "131.0".into(),
@@ -950,4 +960,203 @@ async fn newer_interrupt_wins_resume_generation_race() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn unsupported_resume_keeps_daemon_paused() {
     assert_explicit_resume(ResumeCase::OldExtension).await;
+}
+
+type UiSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+async fn ui_next_frame(ws: &mut UiSocket) -> Frame {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            match ws.next().await.unwrap().unwrap() {
+                Message::Text(text) => return serde_json::from_str(&text).unwrap(),
+                Message::Ping(data) => {
+                    ws.send(Message::Pong(data)).await.unwrap();
+                }
+                other => panic!("unexpected browser frame: {other:?}"),
+            }
+        }
+    })
+    .await
+    .expect("UI resume must not deadlock the socket read loop")
+}
+async fn ui_send(ws: &mut UiSocket, frame: impl serde::Serialize) {
+    ws.send(Message::Text(serde_json::to_string(&frame).unwrap()))
+        .await
+        .unwrap();
+}
+async fn ui_start(sock: &std::path::Path, ws: &mut UiSocket) -> String {
+    let path = sock.to_path_buf();
+    let start = tokio::spawn(async move {
+        IpcClient::connect(&path)
+            .await
+            .unwrap()
+            .call::<_, serde_json::Value>(
+                "start-ui",
+                Method::SessionStart,
+                Some(json!({"browser_instance_id":TEST_EXT_ID})),
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap()
+            .unwrap()
+    });
+    let Frame::Request(request) = ui_next_frame(ws).await else {
+        panic!("expected session start");
+    };
+    assert_eq!(request.method, Method::ToolSessionStart);
+    ui_send(
+        ws,
+        ResponseFrame {
+            id: request.id,
+            body: ResponseBody::Ok(json!({"agent_window_id":42})),
+        },
+    )
+    .await;
+    start.await.unwrap()["session_id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+async fn ui_pause(handle: &daemon::DaemonHandle, ws: &mut UiSocket, sid: &str) {
+    ui_send(
+        ws,
+        EventFrame {
+            event: EventKind::SessionUserInterrupt,
+            payload: json!({"session_id":sid}),
+        },
+    )
+    .await;
+    wait_for_session_interrupt_pending(&handle.state(), sid).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn extension_button_resume_round_trip_keeps_socket_read_loop_live() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    handshake_as_ext(&mut ws).await;
+    let sid = ui_start(&sock, &mut ws).await;
+    ui_pause(&handle, &mut ws, &sid).await;
+    ui_send(
+        &mut ws,
+        RequestFrame {
+            id: "continue-button".into(),
+            method: Method::SessionResume,
+            params: Some(json!({"session_id":sid})),
+        },
+    )
+    .await;
+    let Frame::Request(request) = ui_next_frame(&mut ws).await else {
+        panic!("expected local resume confirmation");
+    };
+    assert_eq!(request.method, Method::ToolSessionResume);
+    assert_eq!(request.params.unwrap()["session_id"], sid);
+    ui_send(
+        &mut ws,
+        ResponseFrame {
+            id: request.id,
+            body: ResponseBody::Ok(json!({"resumed":true,"interrupt_epoch":1})),
+        },
+    )
+    .await;
+    let Frame::Response(reply) = ui_next_frame(&mut ws).await else {
+        panic!("expected UI acknowledgement");
+    };
+    assert_eq!(reply.id, "continue-button");
+    assert!(matches!(reply.body,ResponseBody::Ok(value) if value["resumed"]==true));
+    let state = handle.state();
+    assert_eq!(state.sessions.len(), 1);
+    assert_eq!(state.sessions.snapshot()[0].agent_window_id, Some(42));
+    assert!(
+        !state
+            .session_interrupts
+            .is_pending(&bsk::daemon::sessions::SessionId(sid))
+    );
+    handle.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn extension_button_cannot_resume_another_browsers_session() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut owner = connect_ext(handle.ws_addr()).await;
+    handshake_as_ext(&mut owner).await;
+    let sid = ui_start(&sock, &mut owner).await;
+    ui_pause(&handle, &mut owner, &sid).await;
+    let mut outsider = connect_ext(handle.ws_addr()).await;
+    handshake_as_ext_identity(
+        &mut outsider,
+        bsk::daemon::state::PROTOCOL_VERSION,
+        "other-browser",
+    )
+    .await;
+    ui_send(
+        &mut outsider,
+        RequestFrame {
+            id: "foreign-button".into(),
+            method: Method::SessionResume,
+            params: Some(json!({"session_id":sid})),
+        },
+    )
+    .await;
+    let Frame::Response(reply) = ui_next_frame(&mut outsider).await else {
+        panic!("expected rejection");
+    };
+    assert!(
+        matches!(reply.body,ResponseBody::Err(error) if error.code==ErrorCode::PermissionDenied)
+    );
+    assert!(
+        handle
+            .state()
+            .session_interrupts
+            .is_pending(&bsk::daemon::sessions::SessionId(sid))
+    );
+    handle.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn new_interrupt_wins_while_button_resume_is_awaiting_confirmation() {
+    let (handle, sock) = spawn_daemon().await;
+    let mut ws = connect_ext(handle.ws_addr()).await;
+    handshake_as_ext(&mut ws).await;
+    let sid = ui_start(&sock, &mut ws).await;
+    ui_pause(&handle, &mut ws, &sid).await;
+    ui_send(
+        &mut ws,
+        RequestFrame {
+            id: "racing-button".into(),
+            method: Method::SessionResume,
+            params: Some(json!({"session_id":sid})),
+        },
+    )
+    .await;
+    let Frame::Request(request) = ui_next_frame(&mut ws).await else {
+        panic!("expected local resume");
+    };
+    assert_eq!(request.method, Method::ToolSessionResume);
+    ui_send(
+        &mut ws,
+        EventFrame {
+            event: EventKind::SessionUserInterrupt,
+            payload: json!({"session_id":sid}),
+        },
+    )
+    .await;
+    ui_send(
+        &mut ws,
+        ResponseFrame {
+            id: request.id,
+            body: ResponseBody::Ok(json!({"resumed":true})),
+        },
+    )
+    .await;
+    let Frame::Response(reply) = ui_next_frame(&mut ws).await else {
+        panic!("expected stale-resume rejection");
+    };
+    assert!(matches!(reply.body,ResponseBody::Err(error) if error.code==ErrorCode::UserAborted));
+    assert!(
+        handle
+            .state()
+            .session_interrupts
+            .is_pending(&bsk::daemon::sessions::SessionId(sid))
+    );
+    handle.shutdown().await;
 }

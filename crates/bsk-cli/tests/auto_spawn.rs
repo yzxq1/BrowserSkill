@@ -10,13 +10,13 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 fn bsk_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_bsk"))
+    PathBuf::from(env!("CARGO_BIN_EXE_bsk2"))
 }
 
 fn command(home: &Path, args: &[&str]) -> Command {
     let mut cmd = Command::new(bsk_bin());
     cmd.args(args)
-        .env("BSK_HOME", home)
+        .env("BSK2_HOME", home)
         .env("HOME", home)
         .env_remove("BSK_AUTO_START")
         .env("BSK_AUTO_UPDATE", "off")

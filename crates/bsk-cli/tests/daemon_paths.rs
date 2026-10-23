@@ -11,11 +11,11 @@ use tempfile::TempDir;
 fn home_resolution_preserves_platform_defaults_and_explicit_overrides() {
     const CHILD: &str = "BSK_PATH_RESOLUTION_TEST";
     if std::env::var_os(CHILD).is_some() {
-        let expected = std::env::var("BSK_HOME")
+        let expected = std::env::var("BSK2_HOME")
             .ok()
             .filter(|value| !value.is_empty())
             .map(std::path::PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|home| home.join(".bsk")))
+            .or_else(|| dirs::home_dir().map(|home| home.join(".bsk2")))
             .unwrap();
         assert_eq!(bsk::daemon::paths::bsk_home().unwrap(), expected);
         return;
@@ -33,12 +33,12 @@ fn home_resolution_preserves_platform_defaults_and_explicit_overrides() {
                 ])
                 .env(CHILD, "1")
                 .env_remove("HOME")
-                .env_remove("BSK_HOME");
+                .env_remove("BSK2_HOME");
             if let Some(home) = home {
                 child.env("HOME", home);
             }
             if let Some(home) = bsk_home {
-                child.env("BSK_HOME", home);
+                child.env("BSK2_HOME", home);
             }
             let out = child.output().unwrap();
             assert!(
@@ -60,17 +60,17 @@ fn doctor_reports_unwritable_resolved_home_without_changing_resolution() {
         let temp = TempDir::new().unwrap();
         let blocked = temp.path().join("blocked");
         std::fs::create_dir(&blocked).unwrap();
-        let home = blocked.join(".bsk");
+        let home = blocked.join(".bsk2");
         std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o500)).unwrap();
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_bsk"));
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_bsk2"));
         cmd.args(["--json", "doctor"])
             .env("HOME", &blocked)
-            .env_remove("BSK_HOME")
+            .env_remove("BSK2_HOME")
             .env("BSK_AUTO_START", "0")
             .env("BSK_AUTO_UPDATE", "off")
             .env("BSK_DOCTOR_BROWSER_WAIT_MS", "0");
         if explicit {
-            cmd.env("BSK_HOME", &home);
+            cmd.env("BSK2_HOME", &home);
         }
         let out = cmd.output().unwrap();
         std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -87,13 +87,13 @@ fn doctor_reports_unwritable_resolved_home_without_changing_resolution() {
         assert!(detail.contains("Permission denied"), "{detail}");
         assert!(
             detail.contains(if explicit {
-                "from BSK_HOME"
+                "from BSK2_HOME"
             } else {
                 "from platform home lookup"
             }),
             "{detail}"
         );
-        assert!(check["hint"].as_str().unwrap().contains("BSK_HOME"));
+        assert!(check["hint"].as_str().unwrap().contains("BSK2_HOME"));
         assert!(
             !home.exists(),
             "must not create a daemon home or fall back elsewhere"
@@ -116,9 +116,9 @@ fn inaccessible_discovery_reports_the_path_and_bsk_home_hint() {
     let original = b"inaccessible discovery must not be parsed or removed";
     std::fs::write(&info, original).unwrap();
     std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o0)).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_bsk"))
+    let out = Command::new(env!("CARGO_BIN_EXE_bsk2"))
         .args(["--json", "status"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .env("BSK_AUTO_START", "0")
         .env("BSK_AUTO_UPDATE", "off")
         .output()
@@ -128,7 +128,7 @@ fn inaccessible_discovery_reports_the_path_and_bsk_home_hint() {
     let error = String::from_utf8_lossy(&out.stdout);
     assert!(error.contains(info.to_str().unwrap()), "{error}");
     assert!(error.contains("Permission denied"), "{error}");
-    assert!(error.contains("set BSK_HOME"), "{error}");
+    assert!(error.contains("set BSK2_HOME"), "{error}");
     assert!(
         !error.contains("automatic daemon startup is disabled"),
         "{error}"

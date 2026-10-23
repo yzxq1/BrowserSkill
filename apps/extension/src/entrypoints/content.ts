@@ -10,7 +10,12 @@ import { HelpRequestOverlay } from "@/content/HelpRequestOverlay";
 import { createHelpRequestData } from "@/content/help-request";
 import { createInputPassthroughController } from "@/content/input-passthrough";
 import overlayCss from "@/content/overlay.css?inline";
-import { OverlayController, shouldShowAgentControlOverlay } from "@/content/overlay-controller";
+import {
+  OverlayController,
+  shouldShowAgentControlOverlay,
+  shouldShowPausedOverlay,
+} from "@/content/overlay-controller";
+import { PausedOverlay } from "@/content/PausedOverlay";
 import { RecordOverlay } from "@/content/RecordOverlay";
 import {
   type CaptureSuppressAck,
@@ -59,6 +64,11 @@ import {
   type RecordStopAck,
   type RecordStopMessage,
 } from "@/lib/record-bridge";
+import {
+  type ResumeError,
+  SESSION_CONTROL_MESSAGE,
+  sendSessionControl,
+} from "@/lib/session-control-client";
 import type {
   BorrowCancelMessage,
   BorrowRequestMessage,
@@ -82,6 +92,8 @@ export default defineContentScript({
     let overlayHost: HTMLElement | null = null;
     let overlayContainer: HTMLElement | null = null;
     let activeAgentState: OverlayAgentStateMessage | null = null;
+    let resumingSessionId: string | null = null;
+    let resumeError: ResumeError | null = null;
     const overlayVersions = new OverlayVersionGate();
     let hostLossReported = false;
     let remountInProgress = false;
@@ -191,6 +203,8 @@ export default defineContentScript({
       const overlayState = overlays.snapshot();
       const controlOverlayVisible =
         videoOverlay.canRenderControl() && shouldShowAgentControlOverlay(overlayState);
+      const pausedOverlayVisible =
+        videoOverlay.canRenderControl() && shouldShowPausedOverlay(overlayState);
       // Leaving control (including help/record UI) must not retain click leases.
       if (!controlOverlayVisible) inputPassthrough.reset();
       const interactiveOverlayVisible =
@@ -198,9 +212,9 @@ export default defineContentScript({
         overlayState.activeHelp !== null ||
         overlayState.activeRecord !== null;
       const showInteractive = videoOverlay.canRenderInteractive(interactiveOverlayVisible);
-      setOverlayHostHiddenFromAccessibility(!interactiveOverlayVisible);
+      setOverlayHostHiddenFromAccessibility(!(interactiveOverlayVisible || pausedOverlayVisible));
       setOverlaySurfaceState(
-        controlOverlayVisible,
+        controlOverlayVisible || pausedOverlayVisible,
         controlOverlayVisible && overlayState.automationBypassCount === 0,
       );
       const root = reactRoot;
@@ -221,6 +235,12 @@ export default defineContentScript({
               }),
               React.createElement(RecordOverlay, {
                 request: showInteractive ? overlayState.activeRecord : null,
+              }),
+              React.createElement(PausedOverlay, {
+                visible: pausedOverlayVisible,
+                resuming: resumingSessionId === overlayState.activeSessionId,
+                error: resumeError,
+                onResume: handleResume,
               }),
               React.createElement(ControlOverlay, {
                 visible: controlOverlayVisible,
@@ -268,6 +288,14 @@ export default defineContentScript({
 
     function applyOverlayState(state: OverlayAgentStateMessage): void {
       if (overlays.snapshot().activeSessionId !== state.sessionId) inputPassthrough.reset();
+      if (
+        overlays.snapshot().activeSessionId !== state.sessionId ||
+        state.mode === "control" ||
+        state.mode === "hidden"
+      ) {
+        resumingSessionId = null;
+        resumeError = null;
+      }
       activeAgentState = state;
       overlays.applyAgentControlMode(state.sessionId, state.mode);
       renderAll();
@@ -277,6 +305,8 @@ export default defineContentScript({
       const activeSessionId = overlays.snapshot().activeSessionId;
       if (activeSessionId && activeSessionId !== sessionId) return;
       inputPassthrough.reset();
+      resumingSessionId = null;
+      resumeError = null;
       const previousHelp = overlays.resetAgentOverlays(sessionId);
       if (previousHelp) {
         void sendHelpFinish(previousHelp.id, "cancelled");
@@ -293,14 +323,41 @@ export default defineContentScript({
         console.warn("[bsk overlay] interrupt requested with no active session id");
         return;
       }
+      const stateAtClick = activeAgentState;
       overlays.setInterrupting(true);
+      resumeError = null;
       renderAll();
       void sendInterrupt((msg) => chrome.runtime.sendMessage(msg), sessionId).then((reply) => {
-        resetAgentOverlayState(sessionId);
+        // Preserve the paused session identity for its Continue button. A late
+        // Interrupt ack must not hide another session or undo a newer resume.
+        if (overlays.snapshot().activeSessionId !== sessionId) return;
+        if (activeAgentState !== stateAtClick && activeAgentState?.mode === "control") return;
+        overlays.applyAgentControlMode(sessionId, "paused");
+        renderAll();
         if (!reply.ok) {
           console.warn("[bsk overlay] interrupt did not get a clean ack from daemon");
         }
       });
+    }
+
+    function handleResume() {
+      const state = overlays.snapshot();
+      if (!state.activeSessionId || state.controlMode !== "paused" || resumingSessionId) return;
+      const sessionId = state.activeSessionId;
+      resumingSessionId = sessionId;
+      resumeError = null;
+      renderAll();
+      void sendSessionControl({ kind: SESSION_CONTROL_MESSAGE, action: "resume", sessionId }).then(
+        (reply) => {
+          if (overlays.snapshot().activeSessionId !== sessionId) return;
+          resumingSessionId = null;
+          if (!reply.ok) resumeError = reply.error;
+          else void requestOverlayState();
+          // No optimistic unpause: only authoritative background state changes
+          // can restore the input blocker/control overlay.
+          renderAll();
+        },
+      );
     }
 
     const onMessage = (

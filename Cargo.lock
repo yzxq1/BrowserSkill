@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "bsk"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "base64",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "bsk-protocol"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "indexmap",
  "schemars",

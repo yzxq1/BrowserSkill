@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn bsk_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_bsk"))
+    PathBuf::from(env!("CARGO_BIN_EXE_bsk2"))
 }
 
 #[test]

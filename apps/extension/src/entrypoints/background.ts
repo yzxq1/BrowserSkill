@@ -3,6 +3,7 @@ import { ChromiumCdp } from "@/browser-driver/chromium-cdp";
 import { LocalDebugArchive } from "@/debug/archive";
 import { attachDebugBridge } from "@/debug/bridge";
 import { DebugManager } from "@/debug/manager";
+import { agentPreferences } from "@/lib/agent-preferences";
 import { getAuditEnabled } from "@/lib/audit";
 import { attachAuditBridge } from "@/lib/audit-bridge";
 import { ConnectionController } from "@/lib/connection-controller";
@@ -30,6 +31,10 @@ import {
 import { nextOverlayVersion } from "@/lib/overlay-version";
 import { POPUP_PORT_NAME, type PopupInbound, type PopupOutbound } from "@/lib/popup-bridge";
 import { recordFrameCoordinator } from "@/lib/recording/frame-coordinator";
+import {
+  attachSessionControlBridge,
+  type SessionControlBridge,
+} from "@/lib/session-control-bridge";
 import { attachSessionsLiveFlag } from "@/lib/sessions-live-flag";
 import { captureTaskPreview, focusTask } from "@/lib/task-preview";
 import { attachUiChannel } from "@/lib/ui-channel";
@@ -88,6 +93,7 @@ export default defineBackground(() => {
     },
   });
   const sessions = new SessionManager({ remote: () => remoteEndpoint !== null });
+  let sessionControlBridge: SessionControlBridge | null = null;
   const windowRouting = new AgentWindowRouting(
     sessions,
     chrome,
@@ -302,7 +308,7 @@ export default defineBackground(() => {
 
   function onBrowserControlResumed(sessionId: string): void {
     const ctx = sessions.get(sessionId);
-    if (!ctx) return;
+    if (!ctx || sessionControlBridge?.isResuming(sessionId)) return;
     setControlMode(sessionId, "control");
   }
 
@@ -399,6 +405,7 @@ export default defineBackground(() => {
     debug,
     video,
     interactionPreferences,
+    agentPreferences,
     transport,
     sessions,
     cdp,
@@ -434,6 +441,13 @@ export default defineBackground(() => {
     }),
   });
   dispatcher.start();
+  sessionControlBridge = attachSessionControlBridge({
+    sessions,
+    dispatcher,
+    transport,
+    onPaused: (sessionId) => setControlMode(sessionId, "paused"),
+    onResumed: (sessionId) => setControlMode(sessionId, "control"),
+  });
   if (typeof chrome.notifications?.onClicked?.addListener === "function") {
     attachBorrowNotificationClickHandler({
       onClicked: chrome.notifications.onClicked,

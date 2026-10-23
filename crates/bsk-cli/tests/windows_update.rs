@@ -158,7 +158,7 @@ impl Fixture {
         let exe = dir.join("bsk.exe");
         let home = tmp.path().join("home");
         fs::create_dir(&home).unwrap();
-        fs::copy(env!("CARGO_BIN_EXE_bsk"), &exe).unwrap();
+        fs::copy(env!("CARGO_BIN_EXE_bsk2"), &exe).unwrap();
         // The same program reporting a newer version, as a release must.
         let binary = release_fixture::newer_bsk(tmp.path());
         let server = ReleaseServer::new(&binary);
@@ -174,7 +174,7 @@ impl Fixture {
 
     fn command(&self) -> Command {
         let mut cmd = Command::new(&self.exe);
-        cmd.env("BSK_HOME", &self.home)
+        cmd.env("BSK2_HOME", &self.home)
             .env("BSK_UPDATE_MANIFEST_URL", &self.server.url)
             .env("BSK_AUTO_UPDATE", "off")
             .env("RUST_LOG", "info")
@@ -338,7 +338,7 @@ fn update_from_a_restrictive_job_leaves_a_background_daemon_running() {
         .args(["--exact", "gated_update_process", "--ignored", "--quiet"])
         .env("BSK_GATED_EXE", &fixture.exe)
         .env("BSK_GATED_OUTPUT", &result_path)
-        .env("BSK_HOME", &fixture.home)
+        .env("BSK2_HOME", &fixture.home)
         .env("BSK_UPDATE_MANIFEST_URL", &fixture.server.url)
         .env("BSK_AUTO_UPDATE", "off")
         .env("RUST_LOG", "info")

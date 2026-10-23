@@ -45,7 +45,7 @@ pub fn newer_bsk(dir: &Path) -> Vec<u8> {
 fn build_newer_bsk(dir: &Path) -> Vec<u8> {
     let current = env!("CARGO_PKG_VERSION").as_bytes();
     let newer = newer_version();
-    let original = fs::read(env!("CARGO_BIN_EXE_bsk")).unwrap();
+    let original = fs::read(env!("CARGO_BIN_EXE_bsk2")).unwrap();
     let mut binary = Vec::with_capacity(original.len());
     let mut rest = original.as_slice();
     while let Some(at) = rest

@@ -12,6 +12,7 @@
 >    - Dedicated WebSocket port: `52801`.
 >    - Dedicated home directory: `~/.bsk2`.
 >    - Blue rocket icon for distinct visual identification.
+> 5. **BSK2 Tab Group & User Takeover**: In existing-window mode, every task-created or user-approved borrowed tab is placed in a blue `BSK2` Chrome tab group so you can tell at a glance which tabs the agent controls. Clicking Interrupt tells the agent you are taking over — it stops and waits instead of retrying or opening new tabs.
 >
 > 📖 See details: [Existing Window & Resume Guide](docs/fork-existing-window.zh-CN.md) · [Click-to-Resume Guide](docs/extension-click-resume.zh-CN.md)
 

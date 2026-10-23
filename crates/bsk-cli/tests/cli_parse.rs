@@ -140,7 +140,7 @@ fn parses_daemon_start_with_defaults() {
     };
     assert!(args.port.is_none());
     assert!(!args.foreground);
-    assert_eq!(args.resolved_port(), 52800);
+    assert_eq!(args.resolved_port(), 52801);
     assert_eq!(args.resolved_daemon_idle(), Duration::from_secs(600));
 }
 

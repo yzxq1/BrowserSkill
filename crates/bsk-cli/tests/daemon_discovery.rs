@@ -20,9 +20,9 @@ use tempfile::TempDir;
 const FOREIGN_PID: u32 = 0x3fff_fffe;
 
 fn command(home: &Path, args: &[&str]) -> Command {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_bsk"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_bsk2"));
     cmd.args(args)
-        .env("BSK_HOME", home)
+        .env("BSK2_HOME", home)
         .env("HOME", home)
         .env_remove("BSK_AUTO_START")
         .env("BSK_AUTO_UPDATE", "off")
@@ -502,7 +502,7 @@ fn direct_client_uses_the_same_discovery_rules() {
         let daemon = MockDaemon::new(FOREIGN_PID, |_, info| Some(status(info)));
         let out = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "direct_client_uses_the_same_discovery_rules"])
-            .env("BSK_HOME", daemon.home())
+            .env("BSK2_HOME", daemon.home())
             .env("BSK_DISCOVERY_TEST_CHILD", "1")
             .output()
             .unwrap();
@@ -553,9 +553,9 @@ fn host_daemon_is_usable_but_not_signalable_from_a_child_pid_namespace() {
     let inside = |args: &[&str]| {
         Command::new("unshare")
             .args(["--user", "--map-root-user", "--pid", "--fork"])
-            .arg(env!("CARGO_BIN_EXE_bsk"))
+            .arg(env!("CARGO_BIN_EXE_bsk2"))
             .args(args)
-            .env("BSK_HOME", temp.path())
+            .env("BSK2_HOME", temp.path())
             .env("HOME", temp.path())
             .env("BSK_AUTO_START", "0")
             .env("BSK_AUTO_UPDATE", "off")

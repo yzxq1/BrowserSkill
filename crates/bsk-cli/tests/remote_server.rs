@@ -351,9 +351,9 @@ async fn configured_peer_rate_limit_returns_retry_after_and_ignores_forwarded_ad
     assert_eq!(response.headers()["retry-after"], "60");
 }
 fn cli(home: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_bsk"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_bsk2"));
     command
-        .env("BSK_HOME", home)
+        .env("BSK2_HOME", home)
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("BSK_AUTO_START", "0")

@@ -25,15 +25,15 @@ fn response<T: serde::Serialize>(result: Result<T, RpcError>) -> ResponseBody {
 fn stdin_close_cancels_business_but_releases_resources_with_a_bounded_budget() {
     // Resolve the production registry's root before starting any runtime threads.
     let registry_home = tempfile::tempdir().unwrap();
-    let original_home = std::env::var_os("BSK_HOME");
+    let original_home = std::env::var_os("BSK2_HOME");
     unsafe {
-        std::env::set_var("BSK_HOME", registry_home.path());
+        std::env::set_var("BSK2_HOME", registry_home.path());
     }
     let transfers = Arc::new(TransferRegistry::new().unwrap());
     unsafe {
         match original_home {
-            Some(value) => std::env::set_var("BSK_HOME", value),
-            None => std::env::remove_var("BSK_HOME"),
+            Some(value) => std::env::set_var("BSK2_HOME", value),
+            None => std::env::remove_var("BSK2_HOME"),
         }
     }
     transfers.initialize().unwrap();
@@ -206,8 +206,8 @@ async fn exercise(transfers: Arc<TransferRegistry>, staging_root: &Path) {
             }
         });
 
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_bsk"));
-        cmd.env("BSK_HOME", home.path())
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_bsk2"));
+        cmd.env("BSK2_HOME", home.path())
             .env("BSK_AUTO_UPDATE", "off")
             .env_remove("BSK_CANCEL_ON_STDIN_CLOSE")
             .stdout(std::process::Stdio::piped())

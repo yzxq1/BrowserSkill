@@ -10,7 +10,7 @@ use tempfile::TempDir;
 use tokio::net::UnixStream;
 
 fn bsk_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_bsk"))
+    PathBuf::from(env!("CARGO_BIN_EXE_bsk2"))
 }
 
 fn wait_for_pid_exit(pid: i32, timeout: Duration) -> bool {
@@ -32,7 +32,7 @@ fn daemon_self_exits_after_idle_timeout() {
     std::fs::create_dir_all(&home).unwrap();
 
     let out = Command::new(bsk_bin())
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         // Release checks and daemon replacement are outside this idle-lifecycle test.
         .env("BSK_AUTO_UPDATE", "off")
         .env("BSK_UPDATE_MANIFEST_URL", "http://127.0.0.1:1/disabled")
@@ -69,7 +69,7 @@ fn daemon_stays_alive_while_ipc_connection_is_open() {
     std::fs::create_dir_all(&home).unwrap();
 
     let out = Command::new(bsk_bin())
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         // Release checks and daemon replacement are outside this idle-lifecycle test.
         .env("BSK_AUTO_UPDATE", "off")
         .env("BSK_UPDATE_MANIFEST_URL", "http://127.0.0.1:1/disabled")

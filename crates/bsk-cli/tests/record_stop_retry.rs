@@ -29,7 +29,7 @@ type Ws =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 fn bsk_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_bsk"))
+    PathBuf::from(env!("CARGO_BIN_EXE_bsk2"))
 }
 
 async fn connect_extension(addr: std::net::SocketAddr) -> Ws {

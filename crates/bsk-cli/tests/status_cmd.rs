@@ -18,7 +18,7 @@ fn status_cmd_test_guard() -> MutexGuard<'static, ()> {
 }
 
 fn bsk_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_bsk"))
+    PathBuf::from(env!("CARGO_BIN_EXE_bsk2"))
 }
 
 fn wait_for_pid_exit(pid: i32, timeout: Duration) -> bool {
@@ -43,7 +43,7 @@ fn bsk_status_json_returns_structured_payload() {
     // Isolate the status rendering check from any user daemon on port 52800.
     let start = Command::new(bsk_bin())
         .args(["daemon", "start", "--port", "0", "--daemon-idle", "60s"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .env("BSK_AUTO_UPDATE", "0")
         .output()
         .unwrap();
@@ -55,7 +55,7 @@ fn bsk_status_json_returns_structured_payload() {
 
     let out = Command::new(bsk_bin())
         .args(["--json", "status"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .env("BSK_BROWSER_WAIT_MS", "0")
         .env("RUST_LOG", "warn")
         .output()
@@ -86,7 +86,7 @@ fn bsk_status_json_returns_structured_payload() {
     // Cleanup.
     let _ = Command::new(bsk_bin())
         .args(["daemon", "stop"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .output();
     assert!(wait_for_pid_exit(pid, Duration::from_secs(5)));
 }
@@ -102,7 +102,7 @@ fn bsk_doctor_runs_without_running_daemon() {
     // browser-connect wait so the test doesn't block for 5 s.
     let out = Command::new(bsk_bin())
         .args(["doctor"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .env("RUST_LOG", "warn")
         .env("BSK_DOCTOR_BROWSER_WAIT_MS", "200")
         .output()
@@ -128,7 +128,7 @@ fn bsk_doctor_runs_without_running_daemon() {
             if let Some(pid) = info["pid"].as_u64() {
                 let _ = Command::new(bsk_bin())
                     .args(["daemon", "stop"])
-                    .env("BSK_HOME", &home)
+                    .env("BSK2_HOME", &home)
                     .output();
                 wait_for_pid_exit(pid as i32, Duration::from_secs(5));
             }
@@ -147,7 +147,7 @@ fn bsk_doctor_json_returns_structured_checks() {
     // browser-connect wait so the test doesn't block for 5 s.
     let out = Command::new(bsk_bin())
         .args(["--json", "doctor"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .env("RUST_LOG", "warn")
         .env("BSK_DOCTOR_BROWSER_WAIT_MS", "200")
         .output()
@@ -176,7 +176,7 @@ fn bsk_doctor_json_returns_structured_checks() {
             if let Some(pid) = info["pid"].as_u64() {
                 let _ = Command::new(bsk_bin())
                     .args(["daemon", "stop"])
-                    .env("BSK_HOME", &home)
+                    .env("BSK2_HOME", &home)
                     .output();
                 wait_for_pid_exit(pid as i32, Duration::from_secs(5));
             }
@@ -220,7 +220,7 @@ fn bsk_doctor_does_not_treat_live_non_daemon_pid_as_running() {
 
     let out = Command::new(bsk_bin())
         .args(["--json", "doctor"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .env("RUST_LOG", "warn")
         .output()
         .expect("run bsk doctor --json");
@@ -247,7 +247,7 @@ fn bsk_doctor_flags_pid_mismatch_against_running_daemon() {
     // Bring up a real daemon so the socket is live and IPC works.
     let out = Command::new(bsk_bin())
         .args(["daemon", "start", "--port", "0", "--daemon-idle", "60s"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .env("RUST_LOG", "warn")
         .output()
         .expect("daemon start");
@@ -279,7 +279,7 @@ fn bsk_doctor_flags_pid_mismatch_against_running_daemon() {
 
     let out = Command::new(bsk_bin())
         .args(["--json", "doctor"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .env("RUST_LOG", "warn")
         .output()
         .expect("bsk doctor --json");
@@ -308,7 +308,7 @@ fn bsk_doctor_flags_pid_mismatch_against_running_daemon() {
 
     let _ = Command::new(bsk_bin())
         .args(["daemon", "stop"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .output();
     assert!(wait_for_pid_exit(real_pid, Duration::from_secs(5)));
 }

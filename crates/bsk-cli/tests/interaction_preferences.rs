@@ -19,10 +19,10 @@ type Ws =
 const WAIT: Duration = Duration::from_secs(10);
 
 fn command(home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_bsk"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_bsk2"));
     command
         .args(args)
-        .env("BSK_HOME", home)
+        .env("BSK2_HOME", home)
         .env("HOME", home)
         .env("USERPROFILE", home)
         .env("BSK_REQUEST_HELP", "off")

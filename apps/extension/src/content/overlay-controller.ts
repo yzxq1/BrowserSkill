@@ -159,6 +159,17 @@ export class OverlayController {
   }
 }
 
+export function shouldShowPausedOverlay(state: OverlayState): boolean {
+  return (
+    state.activeSessionId !== null &&
+    state.controlMode === "paused" &&
+    !state.controlHintsHidden &&
+    !state.suppressControlAfterRecord &&
+    state.activeHelp === null &&
+    state.activeRecord === null
+  );
+}
+
 /** Control mask ("Agent 正在控制") must hide while help/record overlays own the chrome. */
 export function shouldShowAgentControlOverlay(state: OverlayState): boolean {
   return (

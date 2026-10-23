@@ -1,5 +1,7 @@
 # 本地定制版：现有窗口与显式恢复
 
+> 本分支现已增加 **BrowserSkill-2 蓝色图标与可点击恢复**，页面/扩展 popup 的“继续执行”需要配套协议 1.6；见[新版说明](extension-click-resume.zh-CN.md)。下文的协议 1.5 与旧测试记录描述此前的核心窗口/CLI 功能。
+
 这是 `yzxq1/BrowserSkill` 的 `feat/existing-window-resume` 分支。保留上游 MIT 许可证；默认独立 Agent Window 行为不变。
 
 ## 哪些功能必须改扩展

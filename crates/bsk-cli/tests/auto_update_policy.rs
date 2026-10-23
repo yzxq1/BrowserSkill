@@ -99,9 +99,9 @@ impl Drop for Daemon {
 }
 
 fn bsk(home: &Path, server: &ReleaseServer) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_bsk"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_bsk2"));
     command
-        .env("BSK_HOME", home)
+        .env("BSK2_HOME", home)
         .env("BSK_UPDATE_MANIFEST_URL", &server.url)
         .env("BSK_AUTO_UPDATE", "on")
         .env("RUST_LOG", "info")

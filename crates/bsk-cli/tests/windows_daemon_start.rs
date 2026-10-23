@@ -200,7 +200,7 @@ impl Fixture {
         Self {
             _temp: temp,
             home,
-            exe: env!("CARGO_BIN_EXE_bsk").into(),
+            exe: env!("CARGO_BIN_EXE_bsk2").into(),
             auto_start: true,
         }
     }
@@ -217,7 +217,7 @@ impl Fixture {
             ])
             .env("BSK_START_TEST_EXE", &self.exe)
             .env("BSK_START_TEST_ARGS", serde_json::to_string(args).unwrap())
-            .env("BSK_HOME", &self.home)
+            .env("BSK2_HOME", &self.home)
             .env("BSK_AUTO_UPDATE", "off")
             .env("BSK_UPDATE_MANIFEST_URL", "http://127.0.0.1:1/unreachable")
             .env("BSK_BROWSER_WAIT_MS", "0")
@@ -352,7 +352,7 @@ fn detached_start_closes_both_pipes_and_reuses_the_daemon() {
     let exe_dir = fixture._temp.path().join("中文 bin space & %PATH% !");
     fs::create_dir(&exe_dir).unwrap();
     fixture.exe = exe_dir.join("bsk.exe");
-    fs::copy(env!("CARGO_BIN_EXE_bsk"), &fixture.exe).unwrap();
+    fs::copy(env!("CARGO_BIN_EXE_bsk2"), &fixture.exe).unwrap();
     success(fixture.run(&["daemon", "start", "--port", "0"], &[]));
     let original = fixture.info();
     let process = open_process(original.pid);

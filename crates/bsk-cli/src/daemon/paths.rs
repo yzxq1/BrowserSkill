@@ -1,9 +1,9 @@
-//! Filesystem layout for the local daemon home (`~/.bsk` by default).
+//! Filesystem layout for the local daemon home (`~/.bsk2` by default).
 //!
 //! Per design §3.2 the daemon owns a per-user home directory containing:
 //!
 //! ```text
-//! ~/.bsk/
+//! ~/.bsk2/
 //!   daemon.lock      advisory file lock (M2.2)
 //!   daemon.sock      UDS socket  (Unix only, M2.3) — actually under run/
 //!   daemon.pid       deprecated; pid lives in daemon.json
@@ -21,15 +21,15 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 /// Environment variable that overrides the home directory.
-pub const BSK_HOME_ENV: &str = "BSK_HOME";
+pub const BSK_HOME_ENV: &str = "BSK2_HOME";
 
-pub(crate) const BSK_HOME_HINT: &str = "set BSK_HOME to a writable private directory; \
+pub(crate) const BSK_HOME_HINT: &str = "set BSK2_HOME to a writable private directory; \
     when using a host daemon, use the same shared directory and allow access to it \
     and its IPC endpoint in the sandbox settings";
 
 /// Resolve the bsk home directory:
-/// 1. `BSK_HOME` env var (any non-empty value); or
-/// 2. `~/.bsk` (using [`dirs::home_dir`]).
+/// 1. `BSK2_HOME` env var (any non-empty value); or
+/// 2. `~/.bsk2` (using [`dirs::home_dir`]).
 pub fn bsk_home() -> Result<PathBuf> {
     if let Ok(p) = env::var(BSK_HOME_ENV) {
         if !p.is_empty() {
@@ -38,16 +38,16 @@ pub fn bsk_home() -> Result<PathBuf> {
     }
     let home = dirs::home_dir()
         .with_context(|| format!("could not determine user home directory; {BSK_HOME_HINT}"))?;
-    Ok(home.join(".bsk"))
+    Ok(home.join(".bsk2"))
 }
 
-/// Ensure `~/.bsk` (or `$BSK_HOME`) exists, creating it with restrictive
+/// Ensure `~/.bsk2` (or `$BSK2_HOME`) exists, creating it with restrictive
 /// permissions on Unix (`chmod 0700`). Returns the resolved path.
 pub fn ensure_bsk_home() -> Result<PathBuf> {
     let home = bsk_home()?;
     prepare_home(&home).with_context(|| {
         let source = if env::var(BSK_HOME_ENV).is_ok_and(|value| !value.is_empty()) {
-            "BSK_HOME"
+            "BSK2_HOME"
         } else {
             "platform home lookup"
         };

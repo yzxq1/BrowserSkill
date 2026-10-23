@@ -5,6 +5,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 Starting from 0.2.0, CLI / Extension / DSH Plugin share the same version number.
 
+## [0.3.5-bsk2] - 2026-10-23
+
+### Changed
+
+- Merged the `main` line (blue BrowserSkill-2 branding, click-to-resume on the
+  page and popup, popup window-strategy and auto-close settings, `bsk2` binary,
+  port `52801`, `~/.bsk2` home) into the existing-window branch, so one build now
+  carries every BSK2 feature together with the `BSK2` tab group and takeover wait.
+- Session stop in existing-window mode removes the BSK2 tab group first, then
+  applies the optional auto-close preference to task-created tabs only.
+- The popup window-strategy / auto-close preferences are injected by the
+  dispatcher; direct callers keep the upstream dedicated-window default.
+- Test fixtures follow the BSK2 isolation: `CARGO_BIN_EXE_bsk2`, `BSK2_HOME`,
+  `~/.bsk2` and port `52801`.
+
 ## [0.3.4-bsk2] - 2026-10-23
 
 ### Added

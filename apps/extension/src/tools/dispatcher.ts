@@ -1,5 +1,6 @@
 import type { DebugManager, DebugTicket } from "@/debug/manager";
 import type { DebugParams } from "@/debug/types";
+import type { AgentPreferenceStore } from "@/lib/agent-preferences";
 import type { InteractionPreferenceStore } from "@/lib/interaction-preferences";
 import { OVERLAY_AUTOMATION_BYPASS } from "@/lib/overlay-bridge";
 import { ScreenshotExports } from "@/long-screenshot/exports";
@@ -160,6 +161,8 @@ export interface DispatcherDeps {
   /** User approval for `tool.tab_borrow` (overlay in content script). */
   approveBorrow?: BorrowConfirmationApprover;
   interactionPreferences?: InteractionPreferenceStore;
+  /** BSK2 popup window strategy / auto-close preferences. */
+  agentPreferences?: Pick<AgentPreferenceStore, "ready" | "get">;
   /** i18n notification copy for `tool.request_help` (resolved per-call). */
   helpNotificationCopy?: () => { title: string; body: string };
 }
@@ -196,6 +199,7 @@ export class ToolDispatcher {
   private readonly onAgentTabClaimed?: (tabId: number, windowId: number) => void;
   private readonly approveBorrow?: BorrowConfirmationApprover;
   private readonly interactionPreferences?: InteractionPreferenceStore;
+  private readonly agentPreferences?: Pick<AgentPreferenceStore, "ready" | "get">;
   private readonly helpNotificationCopy?: () => { title: string; body: string };
   private subscription: { dispose(): void } | null = null;
   private readonly hoverBypassTabs = new Map<number, string>();
@@ -269,6 +273,7 @@ export class ToolDispatcher {
     this.onAgentTabClaimed = deps.onAgentTabClaimed;
     this.approveBorrow = deps.approveBorrow;
     this.interactionPreferences = deps.interactionPreferences;
+    this.agentPreferences = deps.agentPreferences;
     this.helpNotificationCopy = deps.helpNotificationCopy;
   }
 
@@ -527,6 +532,7 @@ export class ToolDispatcher {
         return handleSessionStart(this.sessions, req.params as SessionStartParams, {
           signal,
           preferences: this.interactionPreferences,
+          agentPreferences: this.agentPreferences,
         });
       case "tool.session_stop": {
         if (this.video)
@@ -543,6 +549,7 @@ export class ToolDispatcher {
           // and silently no-op when they are absent.
           tabManagement: { tabs: chromeTabMutationApi },
           tabsQuery: chromeTabsApi,
+          agentPreferences: this.agentPreferences,
           signal,
         });
       }

@@ -2089,10 +2089,10 @@ mod recoverable_starts {
         )
         .unwrap();
         let command = |args: Vec<String>| {
-            let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_bsk"));
+            let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_bsk2"));
             cmd.args(args)
                 .arg("--json")
-                .env("BSK_HOME", home.path())
+                .env("BSK2_HOME", home.path())
                 .env("BSK_AUTO_START", "0")
                 .env("BSK_AUTO_UPDATE", "off")
                 .env_remove("BSK_CANCEL_ON_STDIN_CLOSE")

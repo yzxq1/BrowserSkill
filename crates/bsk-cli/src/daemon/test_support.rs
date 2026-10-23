@@ -11,7 +11,7 @@ pub(super) fn isolated(test_name: &str, test: impl FnOnce()) {
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", test_name, "--nocapture"])
         .env("BSK_LIFECYCLE_TEST", test_name)
-        .env("BSK_HOME", home.path())
+        .env("BSK2_HOME", home.path())
         .env("BSK_AUTO_UPDATE", "off")
         .output()
         .unwrap();

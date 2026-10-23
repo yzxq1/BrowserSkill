@@ -404,11 +404,11 @@ async fn handle_video(state: &Arc<DaemonState>, rpc_id: RpcId, params: Value) ->
 
 fn paused_error() -> RpcError {
     RpcError { code: ErrorCode::UserAborted,
-        message: "User has taken over this browser session. Stop browser work now: do not retry, create tabs, create a new session, or navigate. Tell the user you are waiting. Resume only after an explicit user request with bsk session resume SID, then observe again for fresh state.".into(),
+        message: "User has taken over this browser session. Stop browser work now: do not retry, create tabs, create a new session, or navigate. Tell the user you are waiting. Resume only after an explicit user request (the user may also click Continue in the page or popup) with bsk2 session resume SID, then observe again for fresh state.".into(),
         data: Some(serde_json::json!({"reason":"session_paused", "agent_action":"wait_for_explicit_user_resume"})) }
 }
 
-async fn handle_session_resume(state: &Arc<DaemonState>, params: Value) -> ResponseBody {
+pub(super) async fn handle_session_resume(state: &Arc<DaemonState>, params: Value) -> ResponseBody {
     let params: bsk_protocol::tools::SessionResumeParams = match serde_json::from_value(params) {
         Ok(params) => params,
         Err(error) => return ResponseBody::Err(invalid_params(error.to_string())),
@@ -474,6 +474,8 @@ async fn handle_session_resume(state: &Arc<DaemonState>, params: Value) -> Respo
                 .session_interrupts
                 .clear_if_generation(&sid, generation)
             {
+                state.sessions.touch(&sid);
+                state.audit.marker(&sid.0, "resumed");
                 ResponseBody::Ok(value)
             } else {
                 ResponseBody::Err(paused_error())

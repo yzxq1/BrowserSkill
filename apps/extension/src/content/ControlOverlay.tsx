@@ -67,10 +67,10 @@ export function ControlOverlay({
       <style>{`
         @keyframes bsk-breathe {
           0%, 100% {
-            box-shadow: inset 0 0 20px 4px rgba(249,115,22,0.25);
+            box-shadow: inset 0 0 20px 4px rgba(37,99,235,0.25);
           }
           50% {
-            box-shadow: inset 0 0 40px 8px rgba(249,115,22,0.5);
+            box-shadow: inset 0 0 40px 8px rgba(37,99,235,0.5);
           }
         }
       `}</style>
@@ -127,7 +127,7 @@ export function ControlOverlay({
           backgroundColor: "#fff",
           borderRadius: 9999,
           padding: "10px 10px 10px 20px",
-          boxShadow: "0 8px 32px rgba(124,45,18,0.16), 0 2px 8px rgba(0,0,0,0.1)",
+          boxShadow: "0 8px 32px rgba(30,64,175,0.16), 0 2px 8px rgba(0,0,0,0.1)",
           opacity: show ? 1 : 0,
           transition: "opacity 300ms ease-out",
           fontFamily:
@@ -166,7 +166,7 @@ export function ControlOverlay({
             fontSize: 15,
             fontWeight: 600,
             color: "#fff",
-            backgroundColor: interrupting ? "#9ca3af" : "#f97316",
+            backgroundColor: interrupting ? "#9ca3af" : "#2563eb",
             cursor: interrupting ? "default" : "pointer",
             opacity: interrupting ? 0.7 : 1,
             transition: "background-color 150ms ease-out, opacity 150ms ease-out",

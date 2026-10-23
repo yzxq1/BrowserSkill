@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 fn bsk_bin() -> std::path::PathBuf {
-    let bin = env!("CARGO_BIN_EXE_bsk");
+    let bin = env!("CARGO_BIN_EXE_bsk2");
     std::path::PathBuf::from(bin)
 }
 
@@ -28,7 +28,7 @@ fn foreground_daemon_starts_and_stops() {
             "--daemon-idle",
             "60s",
         ])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .env("RUST_LOG", "info")
         .stdout(Stdio::null())
         .stderr(Stdio::null())

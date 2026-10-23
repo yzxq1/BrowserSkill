@@ -46,7 +46,7 @@ fn with_doctor_env<R>(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let saved = [
-        "BSK_HOME",
+        "BSK2_HOME",
         "BSK_BROWSER_WAIT_MS",
         "BSK_DOCTOR_BROWSER_WAIT_MS",
     ]
@@ -55,7 +55,7 @@ fn with_doctor_env<R>(
     .collect();
     let _restore = EnvRestore(saved);
     unsafe {
-        std::env::set_var("BSK_HOME", bsk_home);
+        std::env::set_var("BSK2_HOME", bsk_home);
         std::env::remove_var("BSK_BROWSER_WAIT_MS");
         std::env::remove_var("BSK_DOCTOR_BROWSER_WAIT_MS");
         for (key, value) in overrides {

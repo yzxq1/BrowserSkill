@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 fn bsk_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_bsk"))
+    PathBuf::from(env!("CARGO_BIN_EXE_bsk2"))
 }
 
 fn wait_for_pid_exit(pid: i32, timeout: Duration) -> bool {
@@ -33,7 +33,7 @@ fn daemon_writes_log_and_bsk_logs_prints_them() {
 
     let out = Command::new(bsk_bin())
         .args(["daemon", "start", "--port", "0", "--daemon-idle", "60s"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .env("RUST_LOG", "info")
         .output()
         .unwrap();
@@ -44,7 +44,7 @@ fn daemon_writes_log_and_bsk_logs_prints_them() {
 
     let logs = Command::new(bsk_bin())
         .args(["logs", "-n", "50"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .output()
         .expect("bsk logs");
     assert!(logs.status.success());
@@ -66,7 +66,7 @@ fn daemon_writes_log_and_bsk_logs_prints_them() {
     let pid = info["pid"].as_u64().unwrap() as i32;
     let _ = Command::new(bsk_bin())
         .args(["daemon", "stop"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .output();
     assert!(wait_for_pid_exit(pid, Duration::from_secs(5)));
 }
@@ -78,7 +78,7 @@ fn bsk_logs_handles_empty_home_gracefully() {
     std::fs::create_dir_all(&home).unwrap();
     let logs = Command::new(bsk_bin())
         .args(["logs"])
-        .env("BSK_HOME", &home)
+        .env("BSK2_HOME", &home)
         .output()
         .expect("bsk logs");
     assert!(logs.status.success());

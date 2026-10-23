@@ -6,6 +6,7 @@ import { AuditPanel } from "@/components/audit-panel";
 import { compareProtocol } from "@/lib/semver";
 import { PROTOCOL_VERSION } from "@/transport/handshake";
 import functionIconUrl from "../../../assets/function.svg";
+import { AgentStrategySettings } from "./agent-strategy-settings";
 import { BrowserProfile } from "./browser-profile";
 import { ConnectionSettings } from "./connection-settings";
 import { ConnectionStatusIndicator } from "./connection-status-indicator";
@@ -14,6 +15,7 @@ import { DebugPanel } from "./debug-panel";
 import { POPUP_FEATURES, type PopupView } from "./features";
 import { InteractionSettings } from "./interaction-settings";
 import { LongScreenshot } from "./long-screenshot";
+import { ResumeTasks } from "./resume-tasks";
 import { SettingInfo } from "./setting-info";
 import { Switch } from "./switch";
 import { type PopupStatusState, useConnectionState } from "./use-connection-state";
@@ -132,7 +134,7 @@ export function App() {
 
   return (
     <main
-      className="min-w-[320px] max-w-[340px] space-y-3 bg-background p-3 text-foreground"
+      className="min-w-[300px] max-w-[320px] space-y-2 bg-background p-2.5 text-foreground text-xs"
       data-slot="popup-root"
       data-view={view}
       data-version-skew={isSkewed ? "true" : undefined}
@@ -249,13 +251,17 @@ export function App() {
             />
           </section>
 
+          <AgentStrategySettings />
+
+          <InteractionSettings />
+
           <section
-            className="rounded-xl border border-border/80 bg-card/60 px-3 py-2.5"
+            className="rounded-xl border border-border/80 bg-card/60 p-2.5"
             data-slot="popup-control-hints-card"
           >
             <div className="relative flex items-center justify-between gap-2">
               <span className="flex min-w-0 items-center gap-1">
-                <span className="truncate text-sm font-medium">
+                <span className="truncate text-xs font-medium">
                   {t("popup.controlHintsToggleTitle")}
                 </span>
                 <SettingInfo
@@ -274,8 +280,7 @@ export function App() {
             </div>
           </section>
 
-          <InteractionSettings />
-
+          <ResumeTasks enabled={connectionLive} />
           <CurrentTasks enabled={connectionLive} />
 
           {snapshot.lastError && (

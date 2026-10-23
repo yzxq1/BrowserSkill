@@ -2,7 +2,7 @@
   "popup": {
     "interactionCompatibilityWarning": "已連線至舊版 Daemon（通訊協定 v{{cliProtocol}}）。部分自動化設定需要更新 CLI 和 Daemon 才能完整生效。",
     "brandCategory": "Browser Automation",
-    "brandName": "BrowserSkill",
+    "brandName": "BrowserSkill-2",
     "stateLabel": {
       "disconnected": "未連線",
       "connecting": "連線中…",
@@ -665,5 +665,19 @@
     "agentHint": "Tell your agent to record before starting the task. It will start and stop recording for you; preview and save the result here.",
     "manual": "Record a running task manually",
     "copyFailed": "Could not copy the prompt. Please try again."
+  },
+  "resumeOverlay": {
+    "paused": "任務已暫停",
+    "resume": "繼續執行",
+    "resuming": "正在恢復…",
+    "tasks": "已暫停的任務",
+    "task": "任務 {{sessionId}}",
+    "hint": "恢復控制，不重播已取消操作。若 AI 對話已停止，請回到對話說「繼續」。",
+    "error_busy": "上一操作仍在清理，請稍後再點「繼續執行」。",
+    "error_disconnected": "連線已中斷或確認逾時，任務保持暫停。",
+    "error_unsupported": "請更新到配套的本機 bsk/daemon，再使用「繼續執行」。",
+    "error_interrupted": "恢復時再次收到中斷，任務保持暫停。",
+    "error_stale": "原工作階段已失效，沒有重新建立工作階段。",
+    "error_failed": "無法確認恢復成功，任務保持暫停。"
   }
 }

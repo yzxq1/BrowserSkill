@@ -165,7 +165,7 @@ impl Fixture {
         let dir = tmp.path().join("bin dir");
         fs::create_dir(&dir).unwrap();
         let exe = dir.join(EXE);
-        fs::copy(env!("CARGO_BIN_EXE_bsk"), &exe).unwrap();
+        fs::copy(env!("CARGO_BIN_EXE_bsk2"), &exe).unwrap();
         let home = tmp.path().join("home");
         fs::create_dir(&home).unwrap();
         let release = release(tmp.path());
@@ -184,7 +184,7 @@ impl Fixture {
     fn command(&self) -> Command {
         let mut command = Command::new(&self.exe);
         command
-            .env("BSK_HOME", &self.home)
+            .env("BSK2_HOME", &self.home)
             .env("BSK_UPDATE_MANIFEST_URL", &self.server.url)
             .env("BSK_AUTO_UPDATE", "off")
             .env("RUST_LOG", "info")
@@ -359,7 +359,7 @@ fn newer_bsk(dir: &Path) -> Vec<u8> {
 /// The bsk under test with a trailing marker: a different file that still
 /// reports the current version, not the one its manifest names.
 fn mislabelled_bsk(_: &Path) -> Vec<u8> {
-    let mut binary = fs::read(env!("CARGO_BIN_EXE_bsk")).unwrap();
+    let mut binary = fs::read(env!("CARGO_BIN_EXE_bsk2")).unwrap();
     binary.extend_from_slice(MARKER);
     binary
 }
@@ -393,7 +393,7 @@ fn release_whose_daemon_hangs(dir: &Path) -> Vec<u8> {
         dir,
         "daemon_hangs",
         r#"
-        let home = std::env::var_os("BSK_HOME").unwrap();
+        let home = std::env::var_os("BSK2_HOME").unwrap();
         let lock = std::fs::OpenOptions::new()
             .read(true)
             .write(true)
