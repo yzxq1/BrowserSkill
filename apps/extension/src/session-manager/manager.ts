@@ -24,6 +24,11 @@ export interface SessionContext {
   agentCreatedTabs: Set<number>;
   /** Observed same-window popups: controllable, but preserved by session stop. */
   observedTabs?: Set<number>;
+  /**
+   * Subset of `observedTabs` the user handed over by dragging them into this
+   * session's BSK2 tab group. Dragging them out of the group releases them.
+   */
+  groupClaimedTabs?: Set<number>;
   /** Unclassified arrivals and failed external moves must not become implicit tool targets. */
   pendingRoutingTabs?: Set<number>;
   createdAtMs: number;
@@ -212,6 +217,7 @@ export class SessionManager {
     for (const ctx of this.sessions.values()) {
       ctx.agentCreatedTabs.delete(tabId);
       ctx.observedTabs?.delete(tabId);
+      ctx.groupClaimedTabs?.delete(tabId);
       if (!isWindowClosing) ctx.borrowedTabs.delete(tabId);
       if (ctx.existingWindow && ctx.defaultTabId === tabId) {
         ctx.defaultTabId =
@@ -230,6 +236,7 @@ export class SessionManager {
     const released: string[] = [];
     for (const ctx of this.sessions.values()) {
       if (ctx.observedTabs?.delete(tabId)) {
+        ctx.groupClaimedTabs?.delete(tabId);
         ctx.refStore.invalidateTab(tabId);
         released.push(ctx.sessionId);
       }
@@ -475,6 +482,7 @@ export class SessionManager {
       ctx.agentCreatedTabs.clear();
       ctx.borrowedTabs.clear();
       ctx.observedTabs?.clear();
+      ctx.groupClaimedTabs?.clear();
       ctx.pendingRoutingTabs?.clear();
       ctx.tabGroupId = undefined;
       ctx.defaultTabId = undefined;

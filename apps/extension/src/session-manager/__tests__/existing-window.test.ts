@@ -298,7 +298,42 @@ describe("existing user window sessions", () => {
     await expect(f.manager.start("shared", { windowId: 99 })).rejects.toThrow("Window already");
     expect(f.existingWindow.get).not.toHaveBeenCalled();
   });
-  it("never automatically claims popup or routes foreign tabs out of a shared window", async () => {
+  it("claims a popup opened from the task tab, groups it and follows it, but never one from a user tab", async () => {
+    const f = fixture();
+    const ctx = await f.manager.start("a", { windowId: 7 });
+    const listeners = new Set<
+      (e: { sourceTabId: number; sourceFrameId: number; tabId: number }) => void
+    >();
+    const ev = <T>() => ({
+      addListener: vi.fn((fn: T) => listeners.add(fn as never)),
+      removeListener: vi.fn((fn: T) => listeners.delete(fn as never)),
+    });
+    const fire = (sourceTabId: number, tabId: number) => {
+      f.pages.set(tabId, { id: tabId, windowId: 7, index: 9 } as chrome.tabs.Tab);
+      for (const fn of [...listeners]) fn({ sourceTabId, sourceFrameId: 0, tabId });
+    };
+    const plain = () => ({ addListener: vi.fn(), removeListener: vi.fn() });
+    vi.stubGlobal("chrome", {
+      tabs: { get: f.tabs.get, onRemoved: plain(), onDetached: plain() },
+      webNavigation: { onCreatedNavigationTarget: ev() },
+    });
+    await withTaskPopups(f.manager, { session_id: "a" }, async (sent) => {
+      sent(20);
+      fire(20, 40);
+    });
+    expect(isAgentControlledTab(ctx, 40)).toBe(true);
+    expect(ctx.defaultTabId).toBe(40);
+    expect(f.tabGroups.add).toHaveBeenCalledWith(70, 40);
+    expect(ctx.agentCreatedTabs.has(40)).toBe(false);
+    // A page opened from the user's own tab stays the user's.
+    await withTaskPopups(f.manager, { session_id: "a" }, async (sent) => {
+      sent(10);
+      fire(10, 41);
+    });
+    expect(isAgentControlledTab(ctx, 41)).toBe(false);
+    expect(f.tabGroups.add).not.toHaveBeenCalledWith(70, 41);
+  });
+  it("never routes foreign tabs out of a shared window", async () => {
     const f = fixture();
     const ctx = await f.manager.start("a", { windowId: 7 });
     const event = () => ({ addListener: vi.fn(), removeListener: vi.fn() });
@@ -322,10 +357,6 @@ describe("existing user window sessions", () => {
       webNavigation: { onCreatedNavigationTarget: event() },
     };
     vi.stubGlobal("chrome", api);
-    await withTaskPopups(f.manager, { session_id: "a" }, async (sent) => {
-      sent(20);
-    });
-    expect(api.webNavigation.onCreatedNavigationTarget.addListener).not.toHaveBeenCalled();
     const routing = new AgentWindowRouting(
       f.manager,
       api as unknown as Pick<typeof chrome, "tabs" | "windows" | "webNavigation">,

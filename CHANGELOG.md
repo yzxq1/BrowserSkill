@@ -5,6 +5,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 Starting from 0.2.0, CLI / Extension / DSH Plugin share the same version number.
 
+## [0.3.6-bsk2] - 2026-10-23
+
+### Added
+
+- **Drag-to-authorize｜拖入即授权**: in existing-window mode, dragging any tab
+  into the session's own `BSK2` tab group hands it to the agent; dragging it out
+  takes control back immediately (CDP and overlay released). Only the concrete
+  group the session created counts; same-named user groups, other windows,
+  incognito tabs and tabs another session controls are ignored. Dragged-in tabs
+  are never closed by stop or auto-close.
+
+### Fixed
+
+- **Popups opened by the agent escaped the BSK2 group｜Agent 打开的新标签跑到组外**:
+  popup tracking was disabled in existing-window mode, so a page opened by
+  clicking a `target=_blank` link became an unowned tab outside the group and
+  the agent kept operating the old page. Popups are now claimed only when the
+  source is a tab the session already controls (never from a user tab), added
+  to the `BSK2` group, and made the default target.
+
 ## [0.3.5-bsk2] - 2026-10-23
 
 ### Changed

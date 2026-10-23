@@ -41,6 +41,7 @@ import { attachUiChannel } from "@/lib/ui-channel";
 import { attachLongScreenshot } from "@/long-screenshot/background";
 import { createDisconnectCleanup } from "@/session-manager/disconnect-cleanup";
 import { attachSessionEventHandler } from "@/session-manager/event-handler";
+import { applyGroupMembership } from "@/session-manager/group-membership";
 import { isAgentControlledTab, SessionManager } from "@/session-manager/manager";
 import { AgentWindowRouting } from "@/session-manager/window-routing";
 import {
@@ -61,7 +62,7 @@ import {
   type RecordRuntimeDeps,
 } from "@/tools/record";
 import { cdpBlockedUrlReason, chromeTabsApi } from "@/tools/shared";
-import { chromeTabMutationApi } from "@/tools/tabs";
+import { chromeAgentOverlayResetApi, chromeTabMutationApi } from "@/tools/tabs";
 import { detectBrowserMeta } from "@/transport/handshake";
 import { watchRemoteAuthorization } from "@/transport/remote-authorization";
 import { type RemoteEndpoint, remoteSocket } from "@/transport/remote-endpoint";
@@ -318,6 +319,26 @@ export default defineBackground(() => {
   }
   chrome.tabs.onActivated.addListener((activeInfo) => {
     pushOverlayStateForAgentWindow(activeInfo.windowId);
+  });
+  // BSK2 drag-to-authorize: dragging a tab into the session's own BSK2 group
+  // hands it to the agent; dragging it out takes it back.
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.groupId === undefined) return;
+    const change = applyGroupMembership(sessions, {
+      tabId,
+      groupId: changeInfo.groupId,
+      windowId: tab.windowId,
+      incognito: tab.incognito,
+    });
+    if (!change) return;
+    if (change.kind === "released") {
+      void chromeAgentOverlayResetApi.resetAgentOverlays(tabId, change.sessionId).catch(() => {});
+      void cdp
+        .releaseSessionTab(change.sessionId, tabId)
+        .catch((error) => console.debug("[bsk2] group release failed", error));
+    }
+    onOverlaySessionStateChanged();
+    void pushOverlayStateForTab(tabId, tab.windowId);
   });
   chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
     if (changeInfo.status !== "complete") return;

@@ -8,7 +8,12 @@ const CANDIDATE_BUDGET_MS = 500;
 /** Browser source relationships are not proof of creation by an agent.
  * Only observe a short interval starting at actual click/key dispatch. Same-window
  * targets may be controlled, but are never added to the destructive cleanup set.
- * Cross-window or late targets retain the explicit borrow flow. */
+ * Cross-window or late targets retain the explicit borrow flow.
+ *
+ * Shared (existing) windows also contain the user's own tabs, so there the
+ * source must be a tab this session already controls, exactly like remote
+ * sessions. A claimed popup joins the BSK2 tab group and becomes the default
+ * target, so the agent follows the page it just opened. */
 export async function withTaskPopups<T>(
   manager: SessionManager,
   params: { session_id?: string; tab_id?: number },
@@ -18,7 +23,8 @@ export async function withTaskPopups<T>(
 ): Promise<T> {
   const task = params.session_id ? manager.get(params.session_id) : null;
   const targets = globalThis.chrome?.webNavigation?.onCreatedNavigationTarget;
-  if (!task || task.existingWindow || !targets || signal?.aborted) return run(() => {});
+  if (!task || !targets || signal?.aborted) return run(() => {});
+  const explicitOnly = task.remote || task.existingWindow;
   const focus = watchPopupFocus(task.agentWindowId);
   let observedPopup = false;
   let finishCreation: (() => void) | undefined;
@@ -35,7 +41,7 @@ export async function withTaskPopups<T>(
     manager.get(task.sessionId) === task &&
     !manager.isWindowCloseExpected(task);
   const validSource = async (id: number) => {
-    if (!live() || invalid.has(id) || (task.remote && !isAgentControlledTab(task, id)))
+    if (!live() || invalid.has(id) || (explicitOnly && !isAgentControlledTab(task, id)))
       return false;
     try {
       const tab = await chrome.tabs.get(id);
@@ -43,7 +49,7 @@ export async function withTaskPopups<T>(
         live() &&
         !invalid.has(id) &&
         tab.windowId === task.agentWindowId &&
-        (!task.remote || isAgentControlledTab(task, id))
+        (!explicitOnly || isAgentControlledTab(task, id))
       );
     } catch {
       return false;
@@ -75,6 +81,15 @@ export async function withTaskPopups<T>(
         // Non-destructive authority: stop releases this tab and preserves its window.
         (task.observedTabs ??= new Set()).add(tabId);
         observedPopup = true;
+        if (task.existingWindow) {
+          task.defaultTabId = tabId;
+          try {
+            await manager.groupControlledTab(task, tabId);
+          } catch (error) {
+            // Grouping is visual only; control was already granted above.
+            console.debug("[bsk2] could not add task popup to the BSK2 group", error);
+          }
+        }
         onClaimed?.(tabId, tab.windowId);
         return true;
       })
