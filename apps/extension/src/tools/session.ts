@@ -384,9 +384,9 @@ async function stopSession(
       ...ctx.borrowedTabs.keys(),
       ...(ctx.observedTabs ?? []),
     ]);
-    // Remove the temporary BSK2 visual ownership marker before releasing
-    // authority. Pages stay open unless the user enabled auto-close below.
-    await manager.ungroupControlledTabs(ctx, controlled);
+    // The BSK2 group is the user's persistent agent area: stop releases control
+    // but leaves the group and its tabs in place for the next session to reuse.
+    // Pages stay open unless the user enabled auto-close below.
     // Optional user preference: close only tabs this session created itself.
     if (deps.agentPreferences) await deps.agentPreferences.ready();
     const shouldCloseTabs = deps.agentPreferences?.get().autoCloseTabs === true;

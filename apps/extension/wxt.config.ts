@@ -34,7 +34,7 @@ export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   manifest: {
     name: "BrowserSkill-2",
-    version_name: `${EXTENSION_VERSION}-bsk2 (drag-to-authorize)`,
+    version_name: `${EXTENSION_VERSION}-bsk2 (persistent group)`,
     description:
       "BrowserSkill-2: independent blue-icon fork with existing-window tasks and clickable pause/resume. Requires the matching bsk daemon.",
     // Flat debugger sessions are required to address out-of-process iframes.

@@ -70,14 +70,19 @@ export async function withTaskPopups<T>(
       .then(async () => {
         if (!(await parent) || !(await validSource(sourceTabId))) return false;
         const tab = await chrome.tabs.get(tabId);
+        // Chrome puts a tab opened from a grouped tab into the same group, so the
+        // drag-to-authorize listener may have claimed it first. That claim is
+        // this same session's; upgrade it to an ordinary task popup.
+        const preGrouped = task.groupClaimedTabs?.has(tabId) === true;
         if (
           !(await validSource(sourceTabId)) ||
           invalid.has(tabId) ||
           tab.windowId !== task.agentWindowId ||
           manager.findBorrowingSession(tabId, task.sessionId) ||
-          manager.findControllingSession(tabId)
+          (!preGrouped && manager.findControllingSession(tabId))
         )
           return false;
+        task.groupClaimedTabs?.delete(tabId);
         // Non-destructive authority: stop releases this tab and preserves its window.
         (task.observedTabs ??= new Set()).add(tabId);
         observedPopup = true;

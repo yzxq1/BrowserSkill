@@ -179,6 +179,41 @@ export class SessionManager {
       }
     }
     ctx.tabGroupId = await this.tabGroups.create(tabId);
+    await this.tabGroups.remember(ctx.agentWindowId, ctx.tabGroupId).catch(() => {});
+  }
+
+  /**
+   * Join the window's persistent BSK2 group, or create it. Returns the group id
+   * plus the tabs that were already inside a reused group: the user left them in
+   * the agent area, which is the same consent as dragging them in.
+   */
+  private async joinBsk2Group(
+    windowId: number,
+    taskTabId: number,
+  ): Promise<{ groupId: number; adopted: number[] }> {
+    const remembered = await this.tabGroups.recall(windowId).catch(() => undefined);
+    if (remembered !== undefined) {
+      try {
+        const before = await this.tabGroups.members(remembered);
+        await this.tabGroups.add(remembered, taskTabId);
+        const others = new Set(
+          [...this.sessions.values()].flatMap((other) => [
+            ...other.agentCreatedTabs,
+            ...other.borrowedTabs.keys(),
+            ...(other.observedTabs ?? []),
+          ]),
+        );
+        return {
+          groupId: remembered,
+          adopted: before.filter((id) => id !== taskTabId && !others.has(id)),
+        };
+      } catch {
+        // Fall through and create a fresh group.
+      }
+    }
+    const groupId = await this.tabGroups.create(taskTabId);
+    await this.tabGroups.remember(windowId, groupId).catch(() => {});
+    return { groupId, adopted: [] };
   }
 
   /** Release visual grouping without changing the tab's control/ownership state. */
@@ -369,8 +404,9 @@ export class SessionManager {
           });
         }
         let tabGroupId: number;
+        let adopted: number[] = [];
         try {
-          tabGroupId = await this.tabGroups.create(tabId);
+          ({ groupId: tabGroupId, adopted } = await this.joinBsk2Group(opts.windowId, tabId));
         } catch (error) {
           throw new Error(
             `Failed to create the BSK2 tab group for task tab ${tabId}; the tab was left open without task control: ${error instanceof Error ? error.message : String(error)}`,
@@ -387,6 +423,10 @@ export class SessionManager {
           refStore: new RefStore(),
           borrowedTabs: new Map(),
           agentCreatedTabs: new Set([tabId]),
+          // Tabs the user left in the persistent BSK2 group stay operable.
+          ...(adopted.length > 0
+            ? { observedTabs: new Set(adopted), groupClaimedTabs: new Set(adopted) }
+            : {}),
           createdAtMs: this.now(),
         };
         this.sessions.set(sessionId, ctx);

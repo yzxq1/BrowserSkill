@@ -11,6 +11,7 @@ import {
 } from "@/tools/tabs";
 import { handleWindowResize } from "@/tools/window";
 import { chromeExistingWindowApi } from "../existing-window";
+import { applyGroupMembership } from "../group-membership";
 import { isAgentControlledTab, SessionManager } from "../manager";
 import { withTaskPopups } from "../task-popups";
 import { AgentWindowRouting } from "../window-routing";
@@ -32,6 +33,21 @@ function fixture() {
     create: vi.fn(async () => 70),
     add: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
+    remembered: new Map<number, number>(),
+    groupMembers: new Map<number, number[]>(),
+    remember: vi.fn(async function (
+      this: { remembered: Map<number, number> },
+      w: number,
+      g: number,
+    ) {
+      this.remembered.set(w, g);
+    }),
+    recall: vi.fn(async function (this: { remembered: Map<number, number> }, w: number) {
+      return this.remembered.get(w);
+    }),
+    members: vi.fn(async function (this: { groupMembers: Map<number, number[]> }, g: number) {
+      return this.groupMembers.get(g) ?? [];
+    }),
   };
   const manager = new SessionManager({ agentWindow, existingWindow, tabGroups });
   const pages = new Map<number, chrome.tabs.Tab>([
@@ -182,7 +198,8 @@ describe("existing user window sessions", () => {
     expect(f.tabs.remove).not.toHaveBeenCalled();
     expect(f.tabs.move).not.toHaveBeenCalled();
     expect(f.agentWindow.remove).not.toHaveBeenCalled();
-    expect(f.tabGroups.remove).toHaveBeenCalledWith(20);
+    // The BSK2 group persists after stop; only control is released.
+    expect(f.tabGroups.remove).not.toHaveBeenCalled();
     expect(f.pages.size).toBe(2);
     expect(f.manager.get("a")).toBeNull();
     expect(isAgentControlledTab(ctx, 20)).toBe(false);
@@ -332,6 +349,17 @@ describe("existing user window sessions", () => {
     });
     expect(isAgentControlledTab(ctx, 41)).toBe(false);
     expect(f.tabGroups.add).not.toHaveBeenCalledWith(70, 41);
+    // Chrome auto-groups a tab opened from a grouped tab, so the group listener
+    // can claim it before the popup event. The popup must still become the target.
+    await withTaskPopups(f.manager, { session_id: "a" }, async (sent) => {
+      sent(40);
+      f.pages.set(42, { id: 42, windowId: 7, index: 10 } as chrome.tabs.Tab);
+      applyGroupMembership(f.manager, { tabId: 42, groupId: 70, windowId: 7 });
+      fire(40, 42);
+    });
+    expect(ctx.defaultTabId).toBe(42);
+    expect(ctx.groupClaimedTabs?.has(42)).toBe(false);
+    expect(isAgentControlledTab(ctx, 42)).toBe(true);
   });
   it("never routes foreign tabs out of a shared window", async () => {
     const f = fixture();

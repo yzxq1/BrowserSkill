@@ -9,6 +9,21 @@ function fixture() {
     create: vi.fn(async () => nextGroup++),
     add: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
+    remembered: new Map<number, number>(),
+    groupMembers: new Map<number, number[]>(),
+    remember: vi.fn(async function (
+      this: { remembered: Map<number, number> },
+      w: number,
+      g: number,
+    ) {
+      this.remembered.set(w, g);
+    }),
+    recall: vi.fn(async function (this: { remembered: Map<number, number> }, w: number) {
+      return this.remembered.get(w);
+    }),
+    members: vi.fn(async function (this: { groupMembers: Map<number, number[]> }, g: number) {
+      return this.groupMembers.get(g) ?? [];
+    }),
   };
   const existingWindow = {
     resolveCurrentWindow: vi.fn(async () => 7),
@@ -77,6 +92,49 @@ describe("BSK2 drag-to-authorize", () => {
     expect(isAgentControlledTab(ctx, 20)).toBe(true);
   });
 
+  it("keeps the BSK2 group after stop and the next session reuses it, adopting tabs left inside", async () => {
+    const f = fixture();
+    const first = await f.manager.start("a", { windowId: 7 });
+    expect(first.tabGroupId).toBe(70);
+    expect(f.tabGroups.remember).toHaveBeenCalledWith(7, 70);
+    applyGroupMembership(f.manager, { tabId: 10, groupId: 70, windowId: 7 });
+    await handleSessionStop(
+      f.manager,
+      { session_id: "a" },
+      {
+        cdp: { releaseSessionTab: vi.fn(async () => {}), detachSession: vi.fn(async () => {}) },
+        tabManagement: { agentOverlayReset: { resetAgentOverlays: vi.fn(async () => {}) } },
+      },
+    );
+    expect(f.tabGroups.remove).not.toHaveBeenCalled();
+    expect(isAgentControlledTab(first, 10)).toBe(false);
+
+    // Group still holds the old task tab 20 and the user's tab 10.
+    f.tabGroups.groupMembers.set(70, [20, 10]);
+    const second = await f.manager.start("b", { windowId: 7 });
+    expect(f.tabGroups.create).toHaveBeenCalledTimes(1);
+    expect(second.tabGroupId).toBe(70);
+    expect(f.tabGroups.add).toHaveBeenCalledWith(70, 20);
+    expect(isAgentControlledTab(second, 10)).toBe(true);
+    // Adopted tabs are non-destructive: never closed by stop or auto-close.
+    expect(second.agentCreatedTabs.has(10)).toBe(false);
+    expect(second.groupClaimedTabs?.has(10)).toBe(true);
+    // Dragging it out still revokes it.
+    applyGroupMembership(f.manager, { tabId: 10, groupId: -1, windowId: 7 });
+    expect(isAgentControlledTab(second, 10)).toBe(false);
+  });
+
+  it("creates a new group when the remembered one is gone", async () => {
+    const f = fixture();
+    await f.manager.start("a", { windowId: 7 });
+    await f.manager.stop("a", { dropOnly: true });
+    f.tabGroups.recall.mockResolvedValueOnce(undefined);
+    const again = await f.manager.start("b", { windowId: 7 });
+    expect(f.tabGroups.create).toHaveBeenCalledTimes(2);
+    expect(again.tabGroupId).toBe(71);
+    expect(again.groupClaimedTabs).toBeUndefined();
+  });
+
   it("session stop releases group-claimed tabs without closing them", async () => {
     const f = fixture();
     const ctx = await f.manager.start("a", { windowId: 7 });
@@ -101,7 +159,7 @@ describe("BSK2 drag-to-authorize", () => {
     // Auto-close only touches the task's own tab, never the user's dragged-in tab.
     expect(remove).toHaveBeenCalledWith(20);
     expect(remove).not.toHaveBeenCalledWith(10);
-    expect(f.tabGroups.remove).toHaveBeenCalledWith(10);
+    expect(f.tabGroups.remove).not.toHaveBeenCalled();
     expect(isAgentControlledTab(ctx, 10)).toBe(false);
     expect(f.manager.get("a")).toBeNull();
   });

@@ -5,6 +5,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 Starting from 0.2.0, CLI / Extension / DSH Plugin share the same version number.
 
+## [0.3.7-bsk2] - 2026-10-23
+
+### Changed
+
+- **Persistent BSK2 group｜常驻 BSK2 分组**: session stop no longer dissolves the
+  `BSK2` tab group; the group and its tabs stay as a fixed agent area. The next
+  existing-window session in that window reuses it, and tabs already inside it
+  (e.g. dragged in while no session ran) are operable from the start, as
+  non-destructive claims. After a browser restart the window's group titled
+  `BSK2` is adopted instead of creating a duplicate.
+
+### Fixed
+
+- A popup opened from a grouped task tab is auto-grouped by Chrome before the
+  popup event; it is now still made the default target (agent follows it).
+
 ## [0.3.6-bsk2] - 2026-10-23
 
 ### Added
