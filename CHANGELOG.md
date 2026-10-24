@@ -5,6 +5,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 Starting from 0.2.0, CLI / Extension / DSH Plugin share the same version number.
 
+## [0.3.8-bsk2] - 2026-10-24
+
+### Changed
+
+- **Any `BSK2` group is an agent area｜任何 BSK2 组都算**: in a shared-window
+  session, every tab group in that window titled exactly `BSK2` grants control
+  over its tabs — the extension's group and any group the user creates or renames
+  to `BSK2` at any time, several at once. Renaming a group away from `BSK2` or
+  dissolving it releases its tabs. Group creation, renaming, dissolving, tab
+  attach/detach and session start all reconcile the whole window.
+
 ## [0.3.7-bsk2] - 2026-10-23
 
 ### Changed

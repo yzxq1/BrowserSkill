@@ -41,7 +41,7 @@ import { attachUiChannel } from "@/lib/ui-channel";
 import { attachLongScreenshot } from "@/long-screenshot/background";
 import { createDisconnectCleanup } from "@/session-manager/disconnect-cleanup";
 import { attachSessionEventHandler } from "@/session-manager/event-handler";
-import { applyGroupMembership } from "@/session-manager/group-membership";
+import { reconcileWindowGroups } from "@/session-manager/group-membership";
 import { isAgentControlledTab, SessionManager } from "@/session-manager/manager";
 import { AgentWindowRouting } from "@/session-manager/window-routing";
 import {
@@ -294,7 +294,9 @@ export default defineBackground(() => {
     }
   }
 
+  let syncAllBsk2GroupsRef: (() => void) | undefined;
   function onOverlaySessionStateChanged(): void {
+    syncAllBsk2GroupsRef?.();
     windowRouting.sync();
     debug.sync();
     video.sync();
@@ -320,26 +322,64 @@ export default defineBackground(() => {
   chrome.tabs.onActivated.addListener((activeInfo) => {
     pushOverlayStateForAgentWindow(activeInfo.windowId);
   });
-  // BSK2 drag-to-authorize: dragging a tab into the session's own BSK2 group
-  // hands it to the agent; dragging it out takes it back.
-  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo.groupId === undefined) return;
-    const change = applyGroupMembership(sessions, {
-      tabId,
-      groupId: changeInfo.groupId,
-      windowId: tab.windowId,
-      incognito: tab.incognito,
+  // BSK2 agent areas: every tab group titled "BSK2" in a shared-window session's
+  // window grants control over the tabs inside it — groups created, renamed or
+  // dissolved at any time, and several at once. Each relevant tab-strip event
+  // reconciles the whole window against the current groups.
+  const pendingGroupSync = new Map<number, ReturnType<typeof setTimeout>>();
+  async function syncBsk2Groups(windowId: number): Promise<void> {
+    const ctx = sessions.findByWindowId(windowId);
+    if (!ctx?.existingWindow) return;
+    const [tabs, groups] = await Promise.all([
+      chrome.tabs.query({ windowId }),
+      chrome.tabGroups.query({ windowId }),
+    ]);
+    const result = reconcileWindowGroups(sessions, {
+      windowId,
+      tabs: tabs
+        .filter((tab): tab is chrome.tabs.Tab & { id: number } => typeof tab.id === "number")
+        .map((tab) => ({ tabId: tab.id, groupId: tab.groupId, incognito: tab.incognito })),
+      groups: groups.map((group) => ({ groupId: group.id, title: group.title })),
     });
-    if (!change) return;
-    if (change.kind === "released") {
-      void chromeAgentOverlayResetApi.resetAgentOverlays(tabId, change.sessionId).catch(() => {});
+    if (!result || (result.claimed.length === 0 && result.released.length === 0)) return;
+    for (const tabId of result.released) {
+      void chromeAgentOverlayResetApi.resetAgentOverlays(tabId, result.sessionId).catch(() => {});
       void cdp
-        .releaseSessionTab(change.sessionId, tabId)
+        .releaseSessionTab(result.sessionId, tabId)
         .catch((error) => console.debug("[bsk2] group release failed", error));
     }
     onOverlaySessionStateChanged();
-    void pushOverlayStateForTab(tabId, tab.windowId);
+    for (const tabId of [...result.claimed, ...result.released])
+      void pushOverlayStateForTab(tabId, windowId);
+  }
+  function scheduleBsk2GroupSync(windowId: number | undefined): void {
+    if (typeof windowId !== "number" || windowId < 0) return;
+    if (!sessions.findByWindowId(windowId)?.existingWindow) return;
+    // Coalesce bursts (a drag fires several events); rename/regroup settle fast.
+    clearTimeout(pendingGroupSync.get(windowId));
+    pendingGroupSync.set(
+      windowId,
+      setTimeout(() => {
+        pendingGroupSync.delete(windowId);
+        void syncBsk2Groups(windowId).catch((error) =>
+          console.debug("[bsk2] group sync failed", error),
+        );
+      }, 50),
+    );
+  }
+  chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+    if (changeInfo.groupId !== undefined) scheduleBsk2GroupSync(tab.windowId);
   });
+  chrome.tabs.onAttached?.addListener((_tabId, info) => scheduleBsk2GroupSync(info?.newWindowId));
+  chrome.tabs.onDetached?.addListener((_tabId, info) => scheduleBsk2GroupSync(info?.oldWindowId));
+  chrome.tabGroups?.onCreated?.addListener((group) => scheduleBsk2GroupSync(group?.windowId));
+  chrome.tabGroups?.onUpdated?.addListener((group) => scheduleBsk2GroupSync(group?.windowId));
+  chrome.tabGroups?.onRemoved?.addListener((group) => scheduleBsk2GroupSync(group?.windowId));
+  // A starting shared-window session adopts tabs already in BSK2 groups.
+  syncAllBsk2GroupsRef = () => {
+    for (const ctx of sessions.list())
+      if (ctx.existingWindow) scheduleBsk2GroupSync(ctx.agentWindowId);
+  };
   chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
     if (changeInfo.status !== "complete") return;
     if (typeof tab.windowId !== "number") return;

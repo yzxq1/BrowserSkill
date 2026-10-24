@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { handleSessionStop } from "@/tools/session";
-import { applyGroupMembership } from "../group-membership";
+import { applyGroupMembership, reconcileWindowGroups } from "../group-membership";
 import { isAgentControlledTab, SessionManager } from "../manager";
 
 function fixture() {
@@ -162,5 +162,138 @@ describe("BSK2 drag-to-authorize", () => {
     expect(f.tabGroups.remove).not.toHaveBeenCalled();
     expect(isAgentControlledTab(ctx, 10)).toBe(false);
     expect(f.manager.get("a")).toBeNull();
+  });
+});
+
+describe("any group titled BSK2 is an agent area", () => {
+  const snap = (
+    tabs: Array<[number, number]>,
+    groups: Array<[number, string | undefined]>,
+    windowId = 7,
+  ) => ({
+    windowId,
+    tabs: tabs.map(([tabId, groupId]) => ({ tabId, groupId })),
+    groups: groups.map(([groupId, title]) => ({ groupId, title })),
+  });
+
+  it("a user-created group renamed to BSK2 mid-session is recognised immediately", async () => {
+    const f = fixture();
+    const ctx = await f.manager.start("a", { windowId: 7 });
+    // User makes an untitled group with tab 10: not an agent area yet.
+    expect(
+      reconcileWindowGroups(
+        f.manager,
+        snap(
+          [
+            [20, 70],
+            [10, 500],
+          ],
+          [
+            [70, "BSK2"],
+            [500, ""],
+          ],
+        ),
+      ),
+    ).toMatchObject({ claimed: [], released: [] });
+    expect(isAgentControlledTab(ctx, 10)).toBe(false);
+    // ...then renames it to BSK2.
+    expect(
+      reconcileWindowGroups(
+        f.manager,
+        snap(
+          [
+            [20, 70],
+            [10, 500],
+          ],
+          [
+            [70, "BSK2"],
+            [500, "BSK2"],
+          ],
+        ),
+      ),
+    ).toMatchObject({ sessionId: "a", claimed: [10], released: [] });
+    expect(isAgentControlledTab(ctx, 10)).toBe(true);
+    expect(ctx.agentCreatedTabs.has(10)).toBe(false);
+  });
+
+  it("tabs in several BSK2 groups are all operable; renaming one away releases only its tabs", async () => {
+    const f = fixture();
+    const ctx = await f.manager.start("a", { windowId: 7 });
+    const groups: Array<[number, string]> = [
+      [70, "BSK2"],
+      [500, "BSK2"],
+      [600, "BSK2"],
+    ];
+    const tabs: Array<[number, number]> = [
+      [20, 70],
+      [10, 500],
+      [11, 600],
+      [12, 600],
+      [13, -1],
+    ];
+    expect(reconcileWindowGroups(f.manager, snap(tabs, groups))?.claimed.sort()).toEqual([
+      10, 11, 12,
+    ]);
+    expect(isAgentControlledTab(ctx, 13)).toBe(false);
+    // Group 600 renamed to "work": its tabs go back to the user.
+    expect(
+      reconcileWindowGroups(
+        f.manager,
+        snap(tabs, [
+          [70, "BSK2"],
+          [500, "BSK2"],
+          [600, "work"],
+        ]),
+      ),
+    ).toMatchObject({ claimed: [], released: [11, 12] });
+    expect(isAgentControlledTab(ctx, 10)).toBe(true);
+    expect(isAgentControlledTab(ctx, 11)).toBe(false);
+    // The agent's own task tab is never released by group changes.
+    expect(reconcileWindowGroups(f.manager, snap([[20, -1]], []))).toMatchObject({
+      released: [10],
+    });
+    expect(isAgentControlledTab(ctx, 20)).toBe(true);
+  });
+
+  it("exact title only, own window only, other sessions' tabs and no-session windows untouched", async () => {
+    const f = fixture();
+    const a = await f.manager.start("a", { windowId: 7 });
+    const b = await f.manager.start("b", { windowId: 8 });
+    expect(
+      reconcileWindowGroups(
+        f.manager,
+        snap(
+          [
+            [10, 500],
+            [11, 501],
+            [12, 502],
+          ],
+          [
+            [500, "bsk2"],
+            [501, "BSK2 "],
+            [502, "BSK-2"],
+          ],
+        ),
+      ),
+    ).toMatchObject({ claimed: [] });
+    // b's task tab 21 shown in a BSK2 group of window 7 stays b's.
+    reconcileWindowGroups(f.manager, snap([[21, 500]], [[500, "BSK2"]]));
+    expect(isAgentControlledTab(a, 21)).toBe(false);
+    expect(isAgentControlledTab(b, 21)).toBe(true);
+    expect(reconcileWindowGroups(f.manager, snap([[30, 900]], [[900, "BSK2"]], 55))).toBeNull();
+  });
+
+  it("drag events honour a BSK2-titled group that is not the session's own", async () => {
+    const f = fixture();
+    const ctx = await f.manager.start("a", { windowId: 7 });
+    expect(
+      applyGroupMembership(f.manager, { tabId: 10, groupId: 500, groupTitle: "BSK2", windowId: 7 }),
+    ).toEqual({ kind: "claimed", sessionId: "a" });
+    // Moving between two BSK2 groups keeps control.
+    expect(applyGroupMembership(f.manager, { tabId: 10, groupId: 70, windowId: 7 })).toBeNull();
+    expect(isAgentControlledTab(ctx, 10)).toBe(true);
+    expect(
+      applyGroupMembership(f.manager, { tabId: 10, groupId: 600, groupTitle: "work", windowId: 7 }),
+    ).toEqual({ kind: "released", sessionId: "a" });
   });
 });
